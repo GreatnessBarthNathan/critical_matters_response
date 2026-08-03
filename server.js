@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const { createApp } = require('./app');
+const createApp = require('./app');
 const { getConfig } = require('./src/config/env');
 const connectDatabase = require('./src/config/database');
 const seedPastor = require('./src/utils/seedPastor');
