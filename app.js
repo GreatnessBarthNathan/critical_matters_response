@@ -8,6 +8,8 @@ const rateLimit = require('express-rate-limit');
 const authRoutes = require('./src/routes/authRoutes');
 const reportRoutes = require('./src/routes/reportRoutes');
 const userRoutes = require('./src/routes/userRoutes');
+const invitationRoutes = require('./src/routes/invitationRoutes');
+const { protect } = require('./src/middleware/authMiddleware');
 const { csrfProtection } = require('./src/middleware/csrfMiddleware');
 const { notFound, errorHandler } = require('./src/middleware/errorMiddleware');
 
@@ -37,8 +39,14 @@ function createApp({ frontendDist: configuredFrontendDist } = {}) {
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', service: 'Critical Matters Response' });
   });
+  // Registration is intentionally invitation-only; keep the retired endpoint unambiguously absent.
+  app.all('/api/auth/register', notFound);
+  // Authenticate this protected mutation before evaluating CSRF so anonymous callers
+  // receive the canonical 401 response; CSRF still applies immediately afterwards.
+  app.post('/api/invitations', protect, (_req, _res, next) => next());
   app.use('/api', csrfProtection);
   app.use('/api/auth', authLimiter, authRoutes);
+  app.use('/api/invitations', invitationRoutes);
   app.use('/api/reports', reportRoutes);
   app.use('/api/users', userRoutes);
 

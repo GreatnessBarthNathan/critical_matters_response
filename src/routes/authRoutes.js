@@ -5,7 +5,6 @@ const { csrfToken } = require('../middleware/csrfMiddleware');
 
 const router = express.Router();
 router.get('/csrf', csrfToken);
-router.post('/register', controller.register);
 router.post('/login', controller.login);
 router.post('/logout', controller.logout);
 router.post('/reset-password', controller.resetPassword);

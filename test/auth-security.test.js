@@ -100,10 +100,10 @@ test('revoked session version is rejected', async (t) => {
   await request(app).get('/api/auth/me').set('Cookie', oldCookie).expect(401);
 });
 
-test('future public invitation inspection and redemption shapes are exempt while administration remains protected', async (t) => {
+test('public invitation inspection and redemption are CSRF-exempt while administration remains protected', async (t) => {
   const app = await createTestApp(t);
 
-  await request(app).get('/api/invitations/invitation-token').expect(404);
-  await request(app).post('/api/invitations/invitation-token/redeem').send({}).expect(404);
-  await request(app).post('/api/invitations').send({}).expect(403);
+  await request(app).get('/api/invitations/invitation-token').expect(400);
+  await request(app).post('/api/invitations/invitation-token/redeem').send({}).expect(400);
+  await request(app).post('/api/invitations').send({}).expect(401);
 });

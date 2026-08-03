@@ -1,6 +1,5 @@
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
-const generateRecoveryKey = require('../utils/recoveryKey');
 const { signToken, setAuthCookie } = require('../utils/authToken');
 
 function normalizeEmail(value = '') {
@@ -10,37 +9,6 @@ function normalizeEmail(value = '') {
 function validatePassword(password) {
   return typeof password === 'string' && password.length >= 8;
 }
-
-exports.register = asyncHandler(async (req, res) => {
-  const { firstName, lastName, password } = req.body;
-  const email = normalizeEmail(req.body.email);
-
-  if (!firstName?.trim() || !lastName?.trim() || !email || !validatePassword(password)) {
-    res.status(400);
-    throw new Error('First name, last name, a valid email, and a password of at least 8 characters are required.');
-  }
-
-  if (await User.exists({ email })) {
-    res.status(409);
-    throw new Error('An account with this email already exists.');
-  }
-
-  const recoveryKey = generateRecoveryKey();
-  const user = await User.create({
-    firstName: firstName.trim(),
-    lastName: lastName.trim(),
-    email,
-    password,
-    recoveryKeyHash: recoveryKey,
-  });
-
-  setAuthCookie(res, signToken(user));
-  res.status(201).json({
-    user: user.toSafeObject(),
-    recoveryKey,
-    message: 'Account created. Save your recovery key somewhere safe; it will not be shown again.',
-  });
-});
 
 exports.login = asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body.email);

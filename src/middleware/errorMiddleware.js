@@ -6,6 +6,10 @@ function errorHandler(error, _req, res, _next) {
   let status = res.statusCode >= 400 ? res.statusCode : 500;
   let message = error.message || 'An unexpected error occurred.';
 
+  if (error.code === 'INVALID_INVITATION') {
+    return res.status(error.status || 400).json({ code: 'INVALID_INVITATION', message: 'INVALID_INVITATION' });
+  }
+
   if (error.name === 'ValidationError') {
     status = 400;
     message = Object.values(error.errors).map((item) => item.message).join(' ');
