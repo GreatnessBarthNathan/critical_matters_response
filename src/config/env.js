@@ -1,11 +1,42 @@
+function isPlaceholderSecret(value) {
+  return /\b(?:change|replace|placeholder|example|default)\b/i.test(value)
+    || /^(?:your|test)[-_ ]?(?:jwt|csrf|secret|key)/i.test(value);
+}
+
+function validateSecret(name, value) {
+  if (Buffer.byteLength(value, 'utf8') < 32 || isPlaceholderSecret(value)) {
+    throw new Error(`${name} must be at least 32 bytes and not use a placeholder value`);
+  }
+}
+
+function decodeTotpEncryptionKey(value) {
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.toString('base64') !== value) {
+    throw new Error('TOTP_ENCRYPTION_KEY must be strict canonical Base64');
+  }
+  if (decoded.length !== 32) {
+    throw new Error('TOTP_ENCRYPTION_KEY must decode to exactly 32 bytes');
+  }
+}
+
 function getConfig(env = process.env) {
   const production = env.NODE_ENV === 'production';
   const required = ['MONGODB_URI', 'JWT_SECRET'];
   if (production) required.push('CSRF_SECRET', 'TOTP_ENCRYPTION_KEY');
   const missing = required.filter((key) => !env[key]);
   if (missing.length) throw new Error(`Missing required environment values: ${missing.join(', ')}`);
-  if (production && Buffer.from(env.TOTP_ENCRYPTION_KEY, 'base64').length !== 32) throw new Error('TOTP_ENCRYPTION_KEY must decode to exactly 32 bytes');
-  return { production, port: Number(env.PORT || 5000), mongodbUri: env.MONGODB_URI };
+  if (production) {
+    validateSecret('JWT_SECRET', env.JWT_SECRET);
+    validateSecret('CSRF_SECRET', env.CSRF_SECRET);
+    decodeTotpEncryptionKey(env.TOTP_ENCRYPTION_KEY);
+  }
+
+  const port = Number(env.PORT || 5000);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('PORT must be an integer between 1 and 65535');
+  }
+
+  return { production, port, mongodbUri: env.MONGODB_URI };
 }
 
 module.exports = { getConfig };

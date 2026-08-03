@@ -10,7 +10,7 @@ const reportRoutes = require('./src/routes/reportRoutes');
 const userRoutes = require('./src/routes/userRoutes');
 const { notFound, errorHandler } = require('./src/middleware/errorMiddleware');
 
-function createApp() {
+function createApp({ frontendDist: configuredFrontendDist } = {}) {
   const app = express();
   const isProduction = process.env.NODE_ENV === 'production';
 
@@ -41,11 +41,11 @@ function createApp() {
   app.use('/api/users', userRoutes);
 
   if (isProduction) {
-    const frontendDist = path.join(__dirname, 'frontend', 'dist');
+    const frontendDist = configuredFrontendDist || path.join(__dirname, 'frontend', 'dist');
     app.use(express.static(frontendDist));
     app.get('/{*splat}', (req, res, next) => {
       if (req.path.startsWith('/api/')) return next();
-      return res.sendFile(path.join(frontendDist, 'index.html'));
+      return res.sendFile('index.html', { root: frontendDist });
     });
   }
 
