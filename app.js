@@ -8,12 +8,11 @@ const rateLimit = require('express-rate-limit');
 const authRoutes = require('./src/routes/authRoutes');
 const reportRoutes = require('./src/routes/reportRoutes');
 const userRoutes = require('./src/routes/userRoutes');
-const invitationRoutes = require('./src/routes/invitationRoutes');
-const { protect } = require('./src/middleware/authMiddleware');
+const createInvitationRoutes = require('./src/routes/invitationRoutes');
 const { csrfProtection } = require('./src/middleware/csrfMiddleware');
 const { notFound, errorHandler } = require('./src/middleware/errorMiddleware');
 
-function createApp({ frontendDist: configuredFrontendDist } = {}) {
+function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits } = {}) {
   const app = express();
   const isProduction = process.env.NODE_ENV === 'production';
 
@@ -41,12 +40,10 @@ function createApp({ frontendDist: configuredFrontendDist } = {}) {
   });
   // Registration is intentionally invitation-only; keep the retired endpoint unambiguously absent.
   app.all('/api/auth/register', notFound);
-  // Authenticate this protected mutation before evaluating CSRF so anonymous callers
-  // receive the canonical 401 response; CSRF still applies immediately afterwards.
-  app.post('/api/invitations', protect, (_req, _res, next) => next());
+  // Invitation admin routes apply protect -> pastorOnly -> CSRF internally.
+  app.use('/api/invitations', createInvitationRoutes(invitationRateLimits));
   app.use('/api', csrfProtection);
   app.use('/api/auth', authLimiter, authRoutes);
-  app.use('/api/invitations', invitationRoutes);
   app.use('/api/reports', reportRoutes);
   app.use('/api/users', userRoutes);
 

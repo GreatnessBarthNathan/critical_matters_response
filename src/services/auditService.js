@@ -40,6 +40,10 @@ async function record(input = {}) {
   };
   if (input.actor) event.actor = input.actor;
   if (input.actorRole) event.actorRole = input.actorRole;
+  if (input.session) {
+    const [createdEvent] = await AuditEvent.create([event], { session: input.session });
+    return createdEvent;
+  }
   return AuditEvent.create(event);
 }
 

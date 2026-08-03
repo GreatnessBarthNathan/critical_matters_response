@@ -9,6 +9,9 @@ function errorHandler(error, _req, res, _next) {
   if (error.code === 'INVALID_INVITATION') {
     return res.status(error.status || 400).json({ code: 'INVALID_INVITATION', message: 'INVALID_INVITATION' });
   }
+  if (error.code === 'INVITATION_CONFLICT' || error.code === 'INVITATION_INACTIVE') {
+    return res.status(error.status || 409).json({ code: error.code, message: error.message });
+  }
 
   if (error.name === 'ValidationError') {
     status = 400;

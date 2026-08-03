@@ -17,6 +17,20 @@ function invalidInvitation() {
   return error;
 }
 
+function invitationConflict() {
+  const error = new Error('An active invitation already exists. Please retry.');
+  error.code = 'INVITATION_CONFLICT';
+  error.status = 409;
+  return error;
+}
+
+function invitationInactive() {
+  const error = new Error('Invitation is no longer active.');
+  error.code = 'INVITATION_INACTIVE';
+  error.status = 409;
+  return error;
+}
+
 function normalizeEmail(value = '') {
   return String(value).trim().toLowerCase();
 }
@@ -70,11 +84,15 @@ async function createInvitation({ email, pastor, ip, userAgent }) {
 
   const now = new Date();
   const replacedInvitations = await Invitation.find({
-    email: normalizedEmail, consumedAt: null, revokedAt: null, expiresAt: { $gt: now },
+    email: normalizedEmail, active: true, consumedAt: null, revokedAt: null, expiresAt: { $gt: now },
   }).select('_id');
   await Invitation.updateMany(
-    { email: normalizedEmail, consumedAt: null, revokedAt: null, expiresAt: { $gt: now } },
-    { $set: { revokedAt: now } },
+    { email: normalizedEmail, active: true, consumedAt: null, revokedAt: null, expiresAt: { $gt: now } },
+    { $set: { active: false, revokedAt: now } },
+  );
+  await Invitation.updateMany(
+    { email: normalizedEmail, active: true, expiresAt: { $lte: now } },
+    { $set: { active: false } },
   );
   await Promise.all(replacedInvitations.map((replaced) => auditService.record({
     actor: pastor._id || pastor.id,
@@ -86,12 +104,19 @@ async function createInvitation({ email, pastor, ip, userAgent }) {
     metadata: safeMetadata(ip, userAgent),
   })));
   const plainToken = generateInvitationToken();
-  const invitation = await Invitation.create({
-    email: normalizedEmail,
-    tokenHash: hashToken(plainToken),
-    createdBy: pastor._id || pastor.id,
-    expiresAt: new Date(now.getTime() + invitationTtlDays() * 24 * 60 * 60 * 1000),
-  });
+  let invitation;
+  try {
+    invitation = await Invitation.create({
+      email: normalizedEmail,
+      tokenHash: hashToken(plainToken),
+      createdBy: pastor._id || pastor.id,
+      expiresAt: new Date(now.getTime() + invitationTtlDays() * 24 * 60 * 60 * 1000),
+      active: true,
+    });
+  } catch (error) {
+    if (error.code === 11000) throw invitationConflict();
+    throw error;
+  }
   await auditService.record({
     actor: pastor._id || pastor.id,
     actorRole: 'pastor',
@@ -104,20 +129,38 @@ async function createInvitation({ email, pastor, ip, userAgent }) {
   return { invitation, plainToken };
 }
 
-async function listInvitations() {
-  return Invitation.find().sort({ createdAt: -1 });
+async function listInvitations({ page = 1, limit = 20 } = {}) {
+  const parsedPage = Number.parseInt(page, 10);
+  const parsedLimit = Number.parseInt(limit, 10);
+  const safePage = Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+  const safeLimit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 100) : 20;
+  const [invitations, total] = await Promise.all([
+    Invitation.find().sort({ createdAt: -1, _id: -1 }).skip((safePage - 1) * safeLimit).limit(safeLimit),
+    Invitation.countDocuments(),
+  ]);
+  return {
+    invitations,
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: Math.ceil(total / safeLimit),
+      hasNextPage: safePage * safeLimit < total,
+    },
+  };
 }
 
 async function revokeInvitation({ invitationId, pastor, ip, userAgent }) {
-  const invitation = await Invitation.findById(invitationId);
+  const invitation = await Invitation.findOneAndUpdate(
+    { _id: invitationId, active: true, consumedAt: null, revokedAt: null },
+    { $set: { active: false, revokedAt: new Date() } },
+    { new: true },
+  );
   if (!invitation) {
+    if (await Invitation.exists({ _id: invitationId })) throw invitationInactive();
     const error = new Error('Invitation not found.');
     error.status = 404;
     throw error;
-  }
-  if (!invitation.consumedAt && !invitation.revokedAt) {
-    invitation.revokedAt = new Date();
-    await invitation.save();
   }
   await auditService.record({
     actor: pastor._id || pastor.id,
@@ -133,7 +176,7 @@ async function revokeInvitation({ invitationId, pastor, ip, userAgent }) {
 
 async function lookupActiveInvitation(plainToken) {
   if (typeof plainToken !== 'string' || !plainToken || plainToken.length > 512) return null;
-  const invitation = await Invitation.findOne({ tokenHash: hashToken(plainToken) }).select('+tokenHash');
+  const invitation = await Invitation.findOne({ tokenHash: hashToken(plainToken), active: true }).select('+tokenHash');
   return isActive(invitation) ? invitation : null;
 }
 
@@ -165,8 +208,8 @@ async function redeemInvitation({ plainToken, firstName, lastName, password, ema
     await session.withTransaction(async () => {
       const now = new Date();
       const invitation = await Invitation.findOneAndUpdate(
-        { tokenHash: hashToken(plainToken), consumedAt: null, revokedAt: null, expiresAt: { $gt: now } },
-        { $set: { consumedAt: now } },
+        { tokenHash: hashToken(plainToken), active: true, consumedAt: null, revokedAt: null, expiresAt: { $gt: now } },
+        { $set: { active: false, consumedAt: now } },
         { new: true, session },
       ).select('+tokenHash');
       if (!invitation) throw invalidInvitation();
@@ -186,14 +229,15 @@ async function redeemInvitation({ plainToken, firstName, lastName, password, ema
         recoveryCodeHashes,
         recoveryKeyHash: generateRecoveryKey(),
       }], { session });
+      await auditService.record({
+        action: 'invitation.redeem',
+        targetType: 'invitation',
+        targetId: invitation.id,
+        result: 'success',
+        metadata: safeMetadata(ip, userAgent),
+        session,
+      });
       result = { user: user[0], recoveryCodes, invitationId: invitation.id };
-    });
-    await auditService.record({
-      action: 'invitation.redeem',
-      targetType: 'invitation',
-      targetId: result.invitationId,
-      result: 'success',
-      metadata: safeMetadata(ip, userAgent),
     });
     return result;
   } catch (error) {

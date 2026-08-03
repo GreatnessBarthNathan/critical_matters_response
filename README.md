@@ -41,7 +41,7 @@ critical-matters-response/
 
 ## Local setup
 
-Requirements: Node.js 20+ and a MongoDB connection string (MongoDB Atlas or a local MongoDB instance).
+Requirements: Node.js 20+ and a MongoDB connection string. Production requires MongoDB Atlas, a sharded cluster, or a replica set because invitation redemption uses multi-document transactions; a standalone MongoDB server is rejected at production startup.
 
 1. Install dependencies (the root post-install step also installs the frontend):
 
@@ -76,7 +76,7 @@ Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`. On startup, the application wi
 - create that account with the `pastor` role if the email does not exist; or
 - promote the matching existing account to pastor.
 
-Public registration always creates a standard church-leader account, so a user cannot register themselves as pastor.
+Accounts are invitation-only. A pastor creates a one-time invitation for a church leader; public registration is unavailable, and a user cannot register themselves as pastor.
 
 After the first production deployment, keep the environment variables in your platform's secure configuration. The bootstrap process does not overwrite an existing pastor's password.
 

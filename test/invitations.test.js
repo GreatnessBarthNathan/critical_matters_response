@@ -5,6 +5,7 @@ const { createTestApp } = require('./helpers/testApp');
 const User = require('../src/models/User');
 const Invitation = require('../src/models/Invitation');
 const AuditEvent = require('../src/models/AuditEvent');
+const auditService = require('../src/services/auditService');
 
 const PASSWORD = 'correct horse battery staple';
 const REPORT_CONTENT = 'private-report-content-must-never-be-audited';
@@ -143,6 +144,97 @@ test('a pre-existing account cannot redeem an invitation for its email', async (
   assert.equal(invitation.consumedAt, null);
 });
 
+test('parallel invitation creation leaves one active invitation and at most one redeemable token', async (t) => {
+  const app = await createTestApp(t);
+  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  const pastorCookies = await signedInCookies(app, 'pastor@example.test');
+  const attempts = await Promise.all([
+    csrf(request(app).post('/api/invitations'), pastorCookies).send({ email: 'parallel@example.test' }),
+    csrf(request(app).post('/api/invitations'), pastorCookies).send({ email: 'parallel@example.test' }),
+  ]);
+  assert.ok(attempts.every((response) => [201, 409].includes(response.status)));
+
+  const activeInvitations = await Invitation.find({ email: 'parallel@example.test', active: true }).select('+active');
+  assert.equal(activeInvitations.length, 1);
+  const tokens = attempts.filter((response) => response.status === 201).map((response) => response.body.token);
+  const redemptions = await Promise.all(tokens.map((token) => request(app)
+    .post(`/api/invitations/${token}/redeem`)
+    .send({ firstName: 'Parallel', lastName: 'Invitee', password: PASSWORD })));
+  assert.equal(redemptions.filter((response) => response.status === 201).length, 1);
+  assert.ok(redemptions.every((response) => [201, 400].includes(response.status)));
+});
+
+test('concurrent revocation and redemption have exactly one winner', async (t) => {
+  const app = await createTestApp(t);
+  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  const pastorCookies = await signedInCookies(app, 'pastor@example.test');
+  const created = await createInvitation(app, pastorCookies, 'race@example.test');
+  const [revocation, redemption] = await Promise.all([
+    csrf(request(app).delete(`/api/invitations/${created.invitation.id}`), pastorCookies),
+    request(app)
+      .post(`/api/invitations/${created.token}/redeem`)
+      .send({ firstName: 'Race', lastName: 'Winner', password: PASSWORD }),
+  ]);
+
+  assert.ok([200, 409].includes(revocation.status));
+  assert.ok([201, 400].includes(redemption.status));
+  assert.equal(Number(revocation.status === 200) + Number(redemption.status === 201), 1);
+  const invitation = await Invitation.findById(created.invitation.id).select('+active');
+  assert.equal(invitation.active, false);
+  assert.equal(Boolean(invitation.revokedAt), revocation.status === 200);
+  assert.equal(Boolean(invitation.consumedAt), redemption.status === 201);
+});
+
+test('a failed transactional success audit rolls back redemption completely', async (t) => {
+  const app = await createTestApp(t);
+  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  const pastorCookies = await signedInCookies(app, 'pastor@example.test');
+  const created = await createInvitation(app, pastorCookies, 'rollback@example.test');
+  const originalRecord = auditService.record;
+  auditService.record = async (input) => {
+    if (input.action === 'invitation.redeem' && input.result === 'success') throw new Error('audit write failed');
+    return originalRecord(input);
+  };
+  try {
+    await request(app)
+      .post(`/api/invitations/${created.token}/redeem`)
+      .send({ firstName: 'Rollback', lastName: 'Test', password: PASSWORD })
+      .expect(500);
+  } finally {
+    auditService.record = originalRecord;
+  }
+
+  const invitation = await Invitation.findById(created.invitation.id).select('+active');
+  assert.equal(invitation.active, true);
+  assert.equal(invitation.consumedAt, null);
+  assert.equal(await User.exists({ email: 'rollback@example.test' }), null);
+  assert.equal(await AuditEvent.exists({ action: 'invitation.redeem', result: 'success' }), null);
+  await request(app)
+    .post(`/api/invitations/${created.token}/redeem`)
+    .send({ firstName: 'Rollback', lastName: 'Test', password: PASSWORD })
+    .expect(201);
+});
+
+test('public inspection and redemption endpoints are independently rate limited by IP', async (t) => {
+  const app = await createTestApp(t, { invitationRateLimits: { inspectLimit: 2, redeemLimit: 2 } });
+  for (let index = 0; index < 2; index += 1) {
+    await request(app).get(`/api/invitations/unknown-inspection-${index}`).expect(400);
+    await request(app)
+      .post(`/api/invitations/unknown-redemption-${index}/redeem`)
+      .send({ firstName: 'Rate', lastName: 'Limited', password: PASSWORD })
+      .expect(400);
+  }
+  const inspectionLimit = await request(app).get('/api/invitations/unknown-inspection-limited').expect(429);
+  const redemptionLimit = await request(app)
+    .post('/api/invitations/unknown-redemption-limited/redeem')
+    .send({ firstName: 'Rate', lastName: 'Limited', password: PASSWORD })
+    .expect(429);
+  assert.equal(inspectionLimit.body.code, 'RATE_LIMITED');
+  assert.equal(redemptionLimit.body.code, 'RATE_LIMITED');
+  assert.ok(inspectionLimit.headers.ratelimit);
+  assert.ok(redemptionLimit.headers.ratelimit);
+});
+
 test('regenerating an invitation revokes its predecessor and no plaintext token is retained', async (t) => {
   const app = await createTestApp(t);
   await createUser({ email: 'pastor@example.test', role: 'pastor' });
@@ -182,4 +274,33 @@ test('listing and revocation are pastor-only and invitation audit records exclud
   assert.doesNotMatch(auditText, /report content/i);
   assert.match(auditText, /invitation\.create/);
   assert.match(auditText, /invitation\.revoke/);
+});
+
+test('invitation listing is paginated and retention uses a 30-day TTL index', async (t) => {
+  const app = await createTestApp(t);
+  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  const pastorCookies = await signedInCookies(app, 'pastor@example.test');
+  await createInvitation(app, pastorCookies, 'page-one@example.test');
+  await createInvitation(app, pastorCookies, 'page-two@example.test');
+  await createInvitation(app, pastorCookies, 'page-three@example.test');
+
+  const response = await request(app)
+    .get('/api/invitations?page=2&limit=1')
+    .set('Cookie', pastorCookies.authCookie)
+    .expect(200);
+  assert.equal(response.body.invitations.length, 1);
+  assert.deepEqual(response.body.pagination, {
+    page: 2,
+    limit: 1,
+    total: 3,
+    totalPages: 3,
+    hasNextPage: true,
+  });
+  const bounded = await request(app)
+    .get('/api/invitations?limit=1000')
+    .set('Cookie', pastorCookies.authCookie)
+    .expect(200);
+  assert.equal(bounded.body.pagination.limit, 100);
+  const ttlIndex = Invitation.schema.indexes().find(([fields, options]) => fields.expiresAt === 1 && options.expireAfterSeconds);
+  assert.equal(ttlIndex[1].expireAfterSeconds, 30 * 24 * 60 * 60);
 });

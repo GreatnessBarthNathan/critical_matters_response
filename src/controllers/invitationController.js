@@ -37,9 +37,12 @@ exports.create = asyncHandler(async (req, res) => {
   });
 });
 
-exports.list = asyncHandler(async (_req, res) => {
-  const invitations = await invitationService.listInvitations();
-  res.json({ invitations: invitations.map(invitationView) });
+exports.list = asyncHandler(async (req, res) => {
+  const { invitations, pagination } = await invitationService.listInvitations({
+    page: req.query.page,
+    limit: req.query.limit,
+  });
+  res.json({ invitations: invitations.map(invitationView), pagination });
 });
 
 exports.revoke = asyncHandler(async (req, res) => {
