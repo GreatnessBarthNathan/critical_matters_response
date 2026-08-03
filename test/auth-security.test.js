@@ -3,10 +3,12 @@ const assert = require('node:assert/strict');
 const request = require('supertest');
 const { createTestApp } = require('./helpers/testApp');
 const User = require('../src/models/User');
+const AuditEvent = require('../src/models/AuditEvent');
 const { authenticator } = require('otplib');
 const auditService = require('../src/services/auditService');
 const seedPastor = require('../src/utils/seedPastor');
 const { encryptSecret, hashToken } = require('../src/utils/crypto');
+const { signToken } = require('../src/utils/authToken');
 
 async function createUser() {
   return User.create({
@@ -540,5 +542,80 @@ test('pastor bootstrap preserves an existing password and TOTP state while new p
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+  }
+});
+
+test('status changes are audited transactionally and audit failures roll back session revocation', async (t) => {
+  const app = await createTestApp(t);
+  const leader = await createUser();
+  const secret = authenticator.generateSecret();
+  const pastor = await User.create({
+    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'pastor', password: 'correct horse battery staple',
+    totp: { enabled: true, encryptedSecret: encryptSecret(secret) },
+  });
+  const pastorCookie = `cmr_token=${signToken(pastor)}`;
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  await request(app)
+    .patch(`/api/users/${leader.id}/status`)
+    .set('Cookie', [pastorCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ isActive: false })
+    .expect(200);
+  const success = await AuditEvent.findOne({ action: 'account.status_changed', targetId: leader.id }).lean();
+  assert.equal(String(success.actor), String(pastor.id));
+  assert.equal(success.actorRole, 'pastor');
+  assert.deepEqual(success.metadata.changedFields, ['isActive']);
+
+  const before = await User.findById(leader.id);
+  const originalRecord = auditService.record;
+  auditService.record = async (input) => {
+    if (input.action === 'account.status_changed' && input.session) throw new Error('audit write failed');
+    return originalRecord(input);
+  };
+  try {
+    await request(app)
+      .patch(`/api/users/${leader.id}/status`)
+      .set('Cookie', [pastorCookie, csrfCookie])
+      .set('X-CSRF-Token', csrf.body.csrfToken)
+      .send({ isActive: true })
+      .expect(500);
+  } finally {
+    auditService.record = originalRecord;
+  }
+  const unchanged = await User.findById(leader.id);
+  assert.equal(unchanged.isActive, before.isActive);
+  assert.equal(unchanged.sessionVersion, before.sessionVersion);
+});
+
+test('logout records a safe event and still clears every auth cookie if auditing is unavailable', async (t) => {
+  const app = await createTestApp(t);
+  const user = await createUser();
+  const authCookie = await signIn(app);
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const loggedOut = await request(app)
+    .post('/api/auth/logout')
+    .set('Cookie', [authCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .expect(200);
+  const event = await AuditEvent.findOne({ action: 'auth.logout', targetId: user.id }).lean();
+  assert.equal(String(event.actor), String(user.id));
+  assert.equal(event.actorRole, 'user');
+  for (const name of ['cmr_token=', 'cmr_totp_pending=', 'cmr_totp_setup=']) {
+    assert.ok(loggedOut.headers['set-cookie'].some((cookie) => cookie.startsWith(name)));
+  }
+
+  const originalRecord = auditService.record;
+  auditService.record = async () => { throw new Error('audit unavailable'); };
+  try {
+    const outage = await request(app)
+      .post('/api/auth/logout')
+      .set('Cookie', [authCookie, csrfCookie])
+      .set('X-CSRF-Token', csrf.body.csrfToken)
+      .expect(200);
+    assert.ok(outage.headers['set-cookie'].some((cookie) => cookie.startsWith('cmr_token=')));
+  } finally {
+    auditService.record = originalRecord;
   }
 });

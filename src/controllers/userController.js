@@ -1,7 +1,9 @@
 const User = require('../models/User');
 const Report = require('../models/Report');
+const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
 const authService = require('../services/authService');
+const auditService = require('../services/auditService');
 
 exports.updateProfile = asyncHandler(async (req, res) => {
   const allowed = ['firstName', 'lastName', 'phone', 'ministry', 'bio', 'avatarColor'];
@@ -29,17 +31,31 @@ exports.listUsers = asyncHandler(async (_req, res) => {
 
 exports.setUserStatus = asyncHandler(async (req, res) => {
   const isActive = Boolean(req.body.isActive);
-  let user = await User.findOneAndUpdate(
-    { _id: req.params.id, role: 'user', isActive: { $ne: isActive } },
-    { $set: { isActive }, $inc: { sessionVersion: 1 } },
-    { new: true },
-  );
-  if (!user) {
-    user = await User.findOne({ _id: req.params.id, role: 'user' });
-    if (!user) {
-      res.status(404);
-      throw new Error('User not found.');
-    }
+  const session = await mongoose.startSession();
+  let user;
+  try {
+    await session.withTransaction(async () => {
+      user = await User.findOneAndUpdate(
+        { _id: req.params.id, role: 'user', isActive: { $ne: isActive } },
+        { $set: { isActive }, $inc: { sessionVersion: 1 } },
+        { new: true, session },
+      );
+      if (!user) {
+        user = await User.findOne({ _id: req.params.id, role: 'user' }).session(session);
+        if (!user) {
+          const error = new Error('User not found.');
+          error.status = 404;
+          throw error;
+        }
+        return;
+      }
+      await auditService.record({
+        actor: req.user.id, actorRole: 'pastor', action: 'account.status_changed', targetType: 'user', targetId: user.id,
+        result: 'success', metadata: { ip: req.ip, userAgent: req.get('user-agent'), changedFields: ['isActive'] }, session,
+      });
+    });
+  } finally {
+    await session.endSession();
   }
   res.json({ user: user.toSafeObject(), message: `Account ${user.isActive ? 'activated' : 'deactivated'}.` });
 });

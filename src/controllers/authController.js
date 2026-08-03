@@ -1,4 +1,7 @@
 const asyncHandler = require('../utils/asyncHandler');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const auditService = require('../services/auditService');
 const {
   signToken,
   setAuthCookie,
@@ -24,7 +27,21 @@ exports.login = asyncHandler(async (req, res) => {
   return res.json({ user: result.user.toSafeObject(), message: 'Welcome back.' });
 });
 
-exports.logout = asyncHandler(async (_req, res) => {
+exports.logout = asyncHandler(async (req, res) => {
+  try {
+    const payload = jwt.verify(req.cookies.cmr_token, process.env.JWT_SECRET);
+    if (!payload.purpose && payload.sub && Number.isInteger(payload.sv)) {
+      const user = await User.findById(payload.sub);
+      if (user && user.isActive && user.sessionVersion === payload.sv) {
+        await auditService.record({
+          actor: user.id, actorRole: user.role, action: 'auth.logout', targetType: 'user', targetId: user.id,
+          result: 'success', metadata: requestMetadata(req),
+        });
+      }
+    }
+  } catch (_error) {
+    // Logging or token validation must never keep client cookies alive.
+  }
   clearAuthCookie(res);
   clearPendingTotpCookie(res);
   clearTotpSetupCookie(res);
