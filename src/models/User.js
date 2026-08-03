@@ -6,7 +6,24 @@ const userSchema = new mongoose.Schema({
   lastName: { type: String, required: true, trim: true, maxlength: 50 },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
   password: { type: String, required: true, minlength: 8, select: false },
-  recoveryKeyHash: { type: String, required: true, select: false },
+  // Retained only so existing records can be read during migration. New accounts never receive a legacy recovery key.
+  recoveryKeyHash: { type: String, select: false },
+  sessionVersion: { type: Number, default: 0 },
+  // New entries are { fingerprint, bcryptHash }; legacy string hashes remain readable for a bounded migration fallback.
+  recoveryCodeHashes: { type: [mongoose.Schema.Types.Mixed], default: [], select: false },
+  totp: {
+    enabled: { type: Boolean, default: false },
+    version: { type: Number, default: 0 },
+    encryptedSecret: { type: String, default: '', select: false },
+  },
+  pendingTotp: {
+    jtiHash: { type: String, default: '', select: false },
+    expiresAt: Date,
+  },
+  assistedReset: {
+    tokenHash: { type: String, default: '', select: false },
+    expiresAt: Date,
+  },
   role: { type: String, enum: ['user', 'pastor'], default: 'user', index: true },
   phone: { type: String, trim: true, maxlength: 30, default: '' },
   ministry: { type: String, trim: true, maxlength: 100, default: '' },
@@ -31,10 +48,6 @@ userSchema.methods.comparePassword = function comparePassword(candidate) {
   return bcrypt.compare(candidate, this.password);
 };
 
-userSchema.methods.compareRecoveryKey = function compareRecoveryKey(candidate) {
-  return bcrypt.compare(candidate.toUpperCase(), this.recoveryKeyHash);
-};
-
 userSchema.methods.toSafeObject = function toSafeObject() {
   return {
     id: this._id,
@@ -47,6 +60,8 @@ userSchema.methods.toSafeObject = function toSafeObject() {
     bio: this.bio,
     avatarColor: this.avatarColor,
     isActive: this.isActive,
+    // Whether two-factor is on is not a secret; the client needs it to render its own state.
+    totpEnabled: Boolean(this.totp?.enabled),
     createdAt: this.createdAt,
     lastLoginAt: this.lastLoginAt,
   };

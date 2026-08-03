@@ -1,35 +1,87 @@
-import { Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react';
 import { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from 'lucide-react';
 import AuthLayout from '../components/AuthLayout';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage() {
-  const { user, login } = useAuth();
+  const { user, pendingTotp, login } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: '', password: '' });
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
   if (user) return <Navigate to="/app" replace />;
+  if (pendingTotp) return <Navigate to="/verify-two-factor" replace />;
 
   const submit = async (event) => {
-    event.preventDefault(); setError(''); setSubmitting(true);
-    try { await login(form); navigate('/app'); } catch (err) { setError(err.message); } finally { setSubmitting(false); }
+    event.preventDefault();
+    setError('');
+    setSubmitting(true);
+    try {
+      const data = await login(form);
+      navigate(data.requiresTotp ? '/verify-two-factor' : '/app', { replace: true });
+    } catch (apiError) {
+      setError(apiError.message);
+      // The email is kept so only the password has to be retyped.
+      setForm((current) => ({ ...current, password: '' }));
+    } finally {
+      setSubmitting(false);
+    }
   };
+
   return (
-    <AuthLayout title="Welcome back" subtitle="Sign in to your private care space.">
-      {error && <div className="form-error">{error}</div>}
+    <AuthLayout
+      title="Sign in"
+      subtitle="Enter your details to continue."
+      footer={<p className="security-note"><ShieldCheck size={14} aria-hidden="true" /> This session is private and encrypted.</p>}
+    >
+      <div aria-live="polite" role="status">
+        {error && <div className="form-error">{error}</div>}
+      </div>
       <form className="stack-form" onSubmit={submit}>
-        <label>Email address<div className="input-wrap"><Mail size={18} /><input type="email" autoComplete="email" required placeholder="you@example.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div></label>
-        <label>Password<div className="input-wrap"><LockKeyhole size={18} /><input type={show ? 'text' : 'password'} autoComplete="current-password" required placeholder="Enter your password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /><button type="button" onClick={() => setShow(!show)} aria-label="Toggle password visibility">{show ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
-        <div className="form-between"><label className="check-label"><input type="checkbox" /> Keep me signed in</label><Link to="/forgot-password">Forgot password?</Link></div>
-        <button className="button button--primary button--full" disabled={submitting}>{submitting ? <span className="button-spinner" /> : 'Sign in securely'}</button>
+        <label htmlFor="login-email">
+          Email address
+          <div className="input-wrap">
+            <Mail size={18} aria-hidden="true" />
+            <input
+              id="login-email"
+              type="email"
+              autoComplete="email"
+              required
+              autoFocus
+              value={form.email}
+              onChange={(event) => setForm({ ...form, email: event.target.value })}
+            />
+          </div>
+        </label>
+
+        <label htmlFor="login-password">
+          Password
+          <div className="input-wrap">
+            <LockKeyhole size={18} aria-hidden="true" />
+            <input
+              id="login-password"
+              type={show ? 'text' : 'password'}
+              autoComplete="current-password"
+              required
+              value={form.password}
+              onChange={(event) => setForm({ ...form, password: event.target.value })}
+            />
+            <button type="button" onClick={() => setShow(!show)} aria-label={show ? 'Hide password' : 'Show password'}>
+              {show ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+        </label>
+
+        <button className="button button--primary button--full" disabled={submitting}>
+          {submitting ? <span className="button-spinner" /> : 'Sign in'}
+        </button>
       </form>
-      <p className="auth-switch">New to Critical Matters? <Link to="/register">Create an account</Link></p>
-      <p className="security-note"><ShieldCheck size={15} /> Your session is protected and private.</p>
+
+      {/* No public registration: access begins with a pastor's invitation. */}
+      <p className="auth-switch"><Link to="/forgot-password">Trouble signing in?</Link></p>
     </AuthLayout>
   );
 }
-
-function ShieldCheck(props) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z"/><path d="m9 12 2 2 4-4"/></svg>; }

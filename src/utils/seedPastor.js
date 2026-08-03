@@ -1,5 +1,4 @@
 const User = require('../models/User');
-const generateRecoveryKey = require('./recoveryKey');
 
 async function seedPastor() {
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
@@ -9,7 +8,7 @@ async function seedPastor() {
     return;
   }
 
-  const existing = await User.findOne({ email }).select('+password +recoveryKeyHash');
+  const existing = await User.findOne({ email }).select('+password');
   if (existing) {
     if (existing.role !== 'pastor') {
       existing.role = 'pastor';
@@ -24,7 +23,6 @@ async function seedPastor() {
     lastName: process.env.ADMIN_LAST_NAME || 'Pastor',
     email,
     password,
-    recoveryKeyHash: generateRecoveryKey(),
     role: 'pastor',
   });
   console.log(`Pastor account created: ${email}`);

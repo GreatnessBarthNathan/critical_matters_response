@@ -1,22 +1,117 @@
-import { FileLock2, Filter, Plus, Search, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Plus, Search } from 'lucide-react';
 import { api, queryString } from '../api/client';
 import EmptyState from '../components/EmptyState';
-import StatusBadge from '../components/StatusBadge';
+import ReportCard from '../components/ReportCard';
+import ReportTable from '../components/ReportTable';
+import { categoryLabels, reportStatus } from '../utils/reportStatus';
 import { useAuth } from '../context/AuthContext';
 
-export default function ReportsPage({ privateOnly = false }) {
-  const { user } = useAuth(); const pastor = user.role === 'pastor';
-  const [reports, setReports] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [filters, setFilters] = useState({ search: '', status: 'all', category: 'all' });
-  const load = useCallback(async () => { setLoading(true); try { const data = await api(`/reports${queryString({ ...filters, sensitivity: privateOnly ? 'private' : undefined })}`); setReports(data.reports); setError(''); } catch (err) { setError(err.message); } finally { setLoading(false); } }, [filters, privateOnly]);
-  useEffect(() => { const timer = setTimeout(load, filters.search ? 300 : 0); return () => clearTimeout(timer); }, [load, filters.search]);
-  return <div className="reports-page">
-    <div className="page-intro"><div><h2>{privateOnly ? 'Highly sensitive reports' : pastor ? 'All confidential matters' : 'Your reports'}</h2><p>{privateOnly ? 'Reports marked for added pastoral discretion.' : pastor ? 'Review and respond to matters shared by church leaders.' : 'View, edit, and continue your private conversations.'}</p></div>{!pastor && <Link className="button button--primary" to="/app/reports/new"><Plus size={17} /> New report</Link>}</div>
-    <div className="filter-bar"><div className="search-field"><Search size={18} /><input value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="Search by subject or reference..." /></div><label><Filter size={16} /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="in_review">In review</option><option value="responded">Responded</option><option value="closed">Closed</option></select></label><label><SlidersHorizontal size={16} /><select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })}><option value="all">All categories</option><option value="general">General</option><option value="family">Family</option><option value="health">Health</option><option value="financial">Financial</option><option value="ministry">Ministry</option><option value="relationship">Relationship</option><option value="other">Other</option></select></label></div>
-    {error && <div className="form-error">{error}</div>}
-    <section className="panel reports-list"><header><span>{loading ? 'Loading…' : `${reports.length} ${reports.length === 1 ? 'report' : 'reports'}`}</span><small><FileLock2 size={14} /> Confidential access</small></header>
-      {loading ? <div className="panel-loading"><span className="spinner" /></div> : reports.length === 0 ? <EmptyState pastor={pastor} filtered={Boolean(filters.search || filters.status !== 'all' || filters.category !== 'all')} /> : reports.map((report) => <Link className="report-list-item" to={`/app/reports/${report._id}`} key={report._id}><span className={`report-icon report-icon--${report.sensitivity}`}><FileLock2 /></span><div className="report-list-item__title"><strong>{report.title}</strong><small>{report.reference} · {report.category}</small></div>{pastor && <div className="report-list-item__owner"><span className="avatar avatar--tiny" style={{ background: report.owner?.avatarColor }}>{report.owner?.firstName?.[0]}{report.owner?.lastName?.[0]}</span><span>{report.owner?.firstName} {report.owner?.lastName}<small>{report.owner?.ministry || 'Church leader'}</small></span></div>}<StatusBadge status={report.status} /><div className="report-list-item__date"><strong>{new Date(report.lastActivityAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</strong><small>{report.responses.length} {report.responses.length === 1 ? 'response' : 'responses'}</small></div></Link>)}
-    </section>
-  </div>;
+const DEFAULT_FILTERS = { search: '', status: 'open', category: 'all' };
+
+export default function ReportsPage({ archivedOnly = false }) {
+  const { user } = useAuth();
+  const pastor = user.role === 'pastor';
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filters, setFilters] = useState(archivedOnly ? { ...DEFAULT_FILTERS, status: 'archived' } : DEFAULT_FILTERS);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api(`/reports${queryString({ ...filters, status: archivedOnly ? 'archived' : filters.status })}`);
+      setReports(data.reports);
+      setError('');
+    } catch (apiError) {
+      setError(apiError.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, archivedOnly]);
+
+  useEffect(() => {
+    const timer = setTimeout(load, filters.search ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [load, filters.search]);
+
+  const filtered = Boolean(filters.search) || filters.category !== 'all' || (!archivedOnly && filters.status !== 'open');
+
+  return (
+    <div className="reports-page">
+      <div className="page-intro">
+        <div>
+          <h2>{archivedOnly ? 'Archive' : pastor ? 'All matters' : 'Your matters'}</h2>
+          <p>
+            {archivedOnly
+              ? 'Closed matters, kept for reference and read-only.'
+              : pastor ? 'Highest priority first.' : 'Your confidential conversations.'}
+          </p>
+        </div>
+        {!pastor && !archivedOnly && (
+          <Link className="button button--primary button--small" to="/app/reports/new">
+            <Plus size={16} aria-hidden="true" /> New
+          </Link>
+        )}
+      </div>
+
+      <div className="filter-bar">
+        <div className="search-field">
+          <Search size={17} aria-hidden="true" />
+          <input
+            type="search"
+            aria-label="Search matters"
+            placeholder="Search subject or reference"
+            value={filters.search}
+            onChange={(event) => setFilters({ ...filters, search: event.target.value })}
+          />
+        </div>
+        {!archivedOnly && (
+          <label>
+            <span className="visually-hidden">Filter by status</span>
+            <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
+              <option value="open">Open matters</option>
+              <option value="all">All statuses</option>
+              {Object.entries(reportStatus).map(([value, { label }]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label>
+          <span className="visually-hidden">Filter by category</span>
+          <select value={filters.category} onChange={(event) => setFilters({ ...filters, category: event.target.value })}>
+            <option value="all">All categories</option>
+            {Object.entries(categoryLabels).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div aria-live="polite" role="status">
+        {error && <div className="form-error">{error}</div>}
+      </div>
+
+      <section className="panel section-panel">
+        <header className="section-panel__header">
+          <h3>{loading ? 'Loading…' : `${reports.length} ${reports.length === 1 ? 'matter' : 'matters'}`}</h3>
+        </header>
+
+        {loading ? (
+          <div className="panel-loading"><span className="spinner" /></div>
+        ) : reports.length === 0 ? (
+          <EmptyState pastor={pastor} filtered={filtered} />
+        ) : (
+          <>
+            <div className="card-list card-list--phone-only">
+              {reports.map((report) => <ReportCard key={report._id} report={report} showOwner={pastor} />)}
+            </div>
+            <ReportTable reports={reports} showOwner={pastor} />
+          </>
+        )}
+      </section>
+    </div>
+  );
 }
