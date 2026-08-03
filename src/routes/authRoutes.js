@@ -14,15 +14,16 @@ function publicLimiter(limit, message) {
   });
 }
 
-function createAuthRoutes({ loginLimit = 100, totpLimit = 10, recoveryLimit = 10 } = {}) {
+function createAuthRoutes({
+  loginLimit = 100, totpLimit = 10, totpSetupLimit = 10, totpConfirmLimit = 10, recoveryLimit = 10,
+} = {}) {
   const router = express.Router();
   router.get('/csrf', csrfToken);
   router.post('/login', publicLimiter(loginLimit, 'Too many sign-in attempts. Please wait a few minutes and try again.'), controller.login);
   router.post('/logout', controller.logout);
-  router.post('/reset-password', publicLimiter(recoveryLimit, 'Too many recovery attempts. Please try again later.'), controller.resetPassword);
   router.get('/me', protect, controller.me);
-  router.post('/totp/setup', protect, controller.beginTotpSetup);
-  router.post('/totp/confirm', protect, controller.confirmTotpSetup);
+  router.post('/totp/setup', publicLimiter(totpSetupLimit, 'Too many two-factor setup attempts. Please try again later.'), protect, controller.beginTotpSetup);
+  router.post('/totp/confirm', publicLimiter(totpConfirmLimit, 'Too many two-factor confirmation attempts. Please try again later.'), protect, controller.confirmTotpSetup);
   router.post('/totp/verify-login', publicLimiter(totpLimit, 'Too many two-factor attempts. Please try again later.'), controller.verifyLoginTotp);
   router.post('/recovery-codes/regenerate', protect, requirePastorTotp, controller.regenerateRecoveryCodes);
   router.post('/recover-with-code', publicLimiter(recoveryLimit, 'Too many recovery attempts. Please try again later.'), controller.recoverWithCode);

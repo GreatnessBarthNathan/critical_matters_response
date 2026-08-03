@@ -1,4 +1,3 @@
-const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const {
   signToken,
@@ -75,31 +74,6 @@ exports.recoverWithCode = asyncHandler(async (req, res) => {
 
 exports.completeAssistedReset = asyncHandler(async (req, res) => {
   await authService.completeAssistedReset({ ...req.body, metadata: requestMetadata(req) });
-  res.json({ message: 'Password reset successfully. You can now sign in.' });
-});
-
-// Kept only for existing recovery-key holders. New accounts are issued recovery codes instead.
-exports.resetPassword = asyncHandler(async (req, res) => {
-  const email = authService.normalizeEmail(req.body.email);
-  const recoveryKey = String(req.body.recoveryKey || '').trim().toUpperCase();
-  const { newPassword } = req.body;
-  if (!email || !recoveryKey || !authService.validatePassword(newPassword)) {
-    const error = new Error(authService.INVALID_RECOVERY);
-    error.code = authService.INVALID_RECOVERY;
-    error.status = 400;
-    throw error;
-  }
-  const user = await User.findOne({ email, isActive: true }).select('+recoveryKeyHash +password');
-  if (!user || !(await user.compareRecoveryKey(recoveryKey))) {
-    const error = new Error(authService.INVALID_RECOVERY);
-    error.code = authService.INVALID_RECOVERY;
-    error.status = 400;
-    throw error;
-  }
-  user.password = newPassword;
-  user.passwordChangedAt = new Date();
-  user.sessionVersion += 1;
-  await user.save();
   res.json({ message: 'Password reset successfully. You can now sign in.' });
 });
 

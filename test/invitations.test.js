@@ -101,7 +101,7 @@ test('inspection is neutral and redemption creates a session with one-time recov
   const user = await User.findOne({ email: 'new.person@example.test' }).select('+recoveryCodeHashes +recoveryKeyHash');
   assert.equal(user.recoveryCodeHashes.length, 8);
   assert.notEqual(user.recoveryCodeHashes[0], redeem.body.recoveryCodes[0]);
-  assert.ok(user.recoveryKeyHash);
+  assert.equal(user.recoveryKeyHash, undefined);
   await request(app).get('/api/auth/me').set('Cookie', redeem.headers['set-cookie']).expect(200);
   await request(app).post(`/api/invitations/${created.token}/redeem`).send({ firstName: 'New', lastName: 'Person', password: PASSWORD }).expect(400);
 

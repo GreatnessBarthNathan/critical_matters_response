@@ -6,7 +6,8 @@ const userSchema = new mongoose.Schema({
   lastName: { type: String, required: true, trim: true, maxlength: 50 },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
   password: { type: String, required: true, minlength: 8, select: false },
-  recoveryKeyHash: { type: String, required: true, select: false },
+  // Retained only so existing records can be read during migration. New accounts never receive a legacy recovery key.
+  recoveryKeyHash: { type: String, select: false },
   sessionVersion: { type: Number, default: 0 },
   recoveryCodeHashes: { type: [String], default: [], select: false },
   totp: {
@@ -39,10 +40,6 @@ userSchema.pre('save', async function hashSensitiveValues(next) {
 
 userSchema.methods.comparePassword = function comparePassword(candidate) {
   return bcrypt.compare(candidate, this.password);
-};
-
-userSchema.methods.compareRecoveryKey = function compareRecoveryKey(candidate) {
-  return bcrypt.compare(candidate.toUpperCase(), this.recoveryKeyHash);
 };
 
 userSchema.methods.toSafeObject = function toSafeObject() {

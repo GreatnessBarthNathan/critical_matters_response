@@ -4,6 +4,9 @@ const request = require('supertest');
 const { createTestApp } = require('./helpers/testApp');
 const User = require('../src/models/User');
 const { authenticator } = require('otplib');
+const auditService = require('../src/services/auditService');
+const seedPastor = require('../src/utils/seedPastor');
+const { encryptSecret, hashToken } = require('../src/utils/crypto');
 
 async function createUser() {
   return User.create({
@@ -76,7 +79,7 @@ test('missing or forged CSRF values are rejected with a stable error code', asyn
     .expect(403);
 });
 
-test('password reset requires CSRF and accepts a valid issued token before validation', async (t) => {
+test('legacy recovery-key password reset endpoint is retired', async (t) => {
   const app = await createTestApp(t);
   await request(app).post('/api/auth/reset-password').send({}).expect(403);
 
@@ -86,8 +89,8 @@ test('password reset requires CSRF and accepts a valid issued token before valid
     .post('/api/auth/reset-password')
     .set('Cookie', csrfCookie)
     .set('X-CSRF-Token', csrfResponse.body.csrfToken)
-    .send({})
-    .expect(400);
+    .send({ email: 'ada@example.test', recoveryKey: 'RECOVERY-KEY', newPassword: 'a newer secure password' })
+    .expect(404);
 });
 
 test('revoked session version is rejected', async (t) => {
@@ -314,4 +317,228 @@ test('pastor-assisted reset is single use, neutral on failure, and revokes the l
     .send({ email: 'leader@example.test', resetCode: issued.body.resetCode, newPassword: 'a newer secure password' })
     .expect(400);
   assert.equal(reused.body.code, 'INVALID_RECOVERY');
+});
+
+test('one recovery code has exactly one winner under concurrent reset attempts', async (t) => {
+  const app = await createTestApp(t);
+  const user = await createUser();
+  const bcrypt = require('bcryptjs');
+  user.recoveryCodeHashes = [await bcrypt.hash('CONCURRENT-RECOVERY-CODE', 12)];
+  await user.save();
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const sendRecovery = () => request(app)
+    .post('/api/auth/recover-with-code')
+    .set('Cookie', csrfCookie)
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ email: 'ada@example.test', recoveryCode: 'CONCURRENT-RECOVERY-CODE', newPassword: 'a newer secure password' });
+  const attempts = await Promise.all([sendRecovery(), sendRecovery()]);
+  assert.equal(attempts.filter((response) => response.status === 200).length, 1);
+  assert.equal(attempts.filter((response) => response.status === 400).length, 1);
+  assert.equal((await User.findById(user.id).select('+recoveryCodeHashes')).recoveryCodeHashes.length, 0);
+});
+
+test('regeneration replaces every recovery code and password change rotates the session', async (t) => {
+  const app = await createTestApp(t);
+  const user = await createUser();
+  const bcrypt = require('bcryptjs');
+  user.recoveryCodeHashes = [await bcrypt.hash('OLD-RECOVERY-CODE', 12)];
+  await user.save();
+  const oldCookie = await signIn(app);
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const regenerated = await request(app)
+    .post('/api/auth/recovery-codes/regenerate')
+    .set('Cookie', [oldCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .expect(200);
+  assert.equal(regenerated.body.recoveryCodes.length, 8);
+  assert.equal(new Set(regenerated.body.recoveryCodes).size, 8);
+  const oldCode = await request(app)
+    .post('/api/auth/recover-with-code')
+    .set('Cookie', csrfCookie)
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ email: 'ada@example.test', recoveryCode: 'OLD-RECOVERY-CODE', newPassword: 'a newer secure password' })
+    .expect(400);
+  assert.equal(oldCode.body.code, 'INVALID_RECOVERY');
+  const changed = await request(app)
+    .patch('/api/auth/change-password')
+    .set('Cookie', [oldCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ currentPassword: 'correct horse battery staple', newPassword: 'a newer secure password' })
+    .expect(200);
+  const refreshedCookie = changed.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token='));
+  await request(app).get('/api/auth/me').set('Cookie', oldCookie).expect(401);
+  await request(app).get('/api/auth/me').set('Cookie', refreshedCookie).expect(200);
+});
+
+test('TOTP setup and confirmation have independent rate limits', async (t) => {
+  const app = await createTestApp(t, { authRateLimits: { totpSetupLimit: 1, totpConfirmLimit: 1 } });
+  await createUser();
+  const authCookie = await signIn(app);
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const setup = await request(app)
+    .post('/api/auth/totp/setup')
+    .set('Cookie', [authCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .expect(200);
+  await request(app)
+    .post('/api/auth/totp/setup')
+    .set('Cookie', [authCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .expect(429);
+  const setupCookie = setup.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_setup='));
+  await request(app)
+    .post('/api/auth/totp/confirm')
+    .set('Cookie', [authCookie, csrfCookie, setupCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: '000000' })
+    .expect(401);
+  await request(app)
+    .post('/api/auth/totp/confirm')
+    .set('Cookie', [authCookie, csrfCookie, setupCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: '000000' })
+    .expect(429);
+});
+
+test('successful login updates and audits roll back together when required audit writes fail', async (t) => {
+  const app = await createTestApp(t);
+  const user = await createUser();
+  const originalRecord = auditService.record;
+  auditService.record = async (input) => {
+    if (input.action === 'auth.login' && input.session) throw new Error('audit write failed');
+    return originalRecord(input);
+  };
+  try {
+    await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'ada@example.test', password: 'correct horse battery staple' })
+      .expect(500);
+  } finally {
+    auditService.record = originalRecord;
+  }
+  assert.equal((await User.findById(user.id)).lastLoginAt, undefined);
+
+  const secret = authenticator.generateSecret();
+  user.totp = { enabled: true, encryptedSecret: encryptSecret(secret) };
+  await user.save();
+  const pending = await request(app)
+    .post('/api/auth/login')
+    .send({ email: 'ada@example.test', password: 'correct horse battery staple' })
+    .expect(200);
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  auditService.record = async (input) => {
+    if (input.action === 'auth.login' && input.session) throw new Error('audit write failed');
+    return originalRecord(input);
+  };
+  try {
+    await request(app)
+      .post('/api/auth/totp/verify-login')
+      .set('Cookie', [pending.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_pending=')), csrfCookie])
+      .set('X-CSRF-Token', csrf.body.csrfToken)
+      .send({ token: authenticator.generate(secret) })
+      .expect(500);
+  } finally {
+    auditService.record = originalRecord;
+  }
+  assert.equal((await User.findById(user.id)).lastLoginAt, undefined);
+});
+
+test('expired assisted reset is neutral and deactivation permanently revokes old sessions', async (t) => {
+  const app = await createTestApp(t);
+  const leader = await createUser();
+  const resetCode = 'expired-assisted-reset-code';
+  await User.updateOne({ _id: leader.id }, {
+    $set: { 'assistedReset.tokenHash': hashToken(resetCode), 'assistedReset.expiresAt': new Date(Date.now() - 1000) },
+  });
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const expired = await request(app)
+    .post('/api/auth/assisted-reset')
+    .set('Cookie', csrfCookie)
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ email: 'ada@example.test', resetCode, newPassword: 'a newer secure password' })
+    .expect(400);
+  assert.equal(expired.body.code, 'INVALID_RECOVERY');
+
+  const secret = authenticator.generateSecret();
+  const pastor = await User.create({
+    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'pastor', password: 'correct horse battery staple',
+    totp: { enabled: true, encryptedSecret: encryptSecret(secret) },
+  });
+  const leaderCookie = await signIn(app);
+  const pastorLogin = await request(app).post('/api/auth/login').send({ email: pastor.email, password: 'correct horse battery staple' }).expect(200);
+  const pastorCookie = await request(app)
+    .post('/api/auth/totp/verify-login')
+    .set('Cookie', [pastorLogin.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_pending=')), csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: authenticator.generate(secret) })
+    .expect(200)
+    .then((response) => response.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token=')));
+  await request(app)
+    .patch(`/api/users/${leader.id}/status`)
+    .set('Cookie', [pastorCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ isActive: false })
+    .expect(200);
+  await request(app).get('/api/auth/me').set('Cookie', leaderCookie).expect(401);
+  await request(app)
+    .patch(`/api/users/${leader.id}/status`)
+    .set('Cookie', [pastorCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ isActive: true })
+    .expect(200);
+  await request(app).get('/api/auth/me').set('Cookie', leaderCookie).expect(401);
+});
+
+test('pastor bootstrap preserves an existing password and TOTP state while new pastors begin at setup', async (t) => {
+  const app = await createTestApp(t);
+  const previous = {
+    ADMIN_EMAIL: process.env.ADMIN_EMAIL,
+    ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
+    ADMIN_FIRST_NAME: process.env.ADMIN_FIRST_NAME,
+    ADMIN_LAST_NAME: process.env.ADMIN_LAST_NAME,
+  };
+  const secret = authenticator.generateSecret();
+  const existing = await User.create({
+    firstName: 'Existing', lastName: 'Pastor', email: 'bootstrap@example.test', role: 'pastor', password: 'original secure password',
+    totp: { enabled: true, encryptedSecret: encryptSecret(secret) },
+  });
+  try {
+    process.env.ADMIN_EMAIL = existing.email;
+    process.env.ADMIN_PASSWORD = 'replacement secure password';
+    await seedPastor();
+    const preserved = await User.findById(existing.id).select('+password +totp.encryptedSecret');
+    assert.equal(await preserved.comparePassword('original secure password'), true);
+    assert.equal(preserved.totp.enabled, true);
+    assert.equal(preserved.totp.encryptedSecret, existing.totp.encryptedSecret);
+
+    process.env.ADMIN_EMAIL = 'new-bootstrap@example.test';
+    process.env.ADMIN_PASSWORD = 'new pastor secure password';
+    await seedPastor();
+    const newPastor = await User.findOne({ email: process.env.ADMIN_EMAIL }).select('+recoveryCodeHashes');
+    assert.equal(newPastor.totp.enabled, false);
+    assert.deepEqual(newPastor.recoveryCodeHashes, []);
+    const login = await request(app)
+      .post('/api/auth/login')
+      .send({ email: newPastor.email, password: 'new pastor secure password' })
+      .expect(200);
+    const authCookie = login.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token='));
+    const csrf = await request(app).get('/api/auth/csrf').expect(200);
+    const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+    await request(app).get('/api/reports').set('Cookie', authCookie).expect(403);
+    await request(app)
+      .post('/api/auth/totp/setup')
+      .set('Cookie', [authCookie, csrfCookie])
+      .set('X-CSRF-Token', csrf.body.csrfToken)
+      .expect(200);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

@@ -5,7 +5,6 @@ const Invitation = require('../models/Invitation');
 const User = require('../models/User');
 const auditService = require('./auditService');
 const { hashToken } = require('../utils/crypto');
-const generateRecoveryKey = require('../utils/recoveryKey');
 const { generateRecoveryCodes } = require('./authService');
 
 const INVALID_INVITATION = 'INVALID_INVITATION';
@@ -254,7 +253,6 @@ async function redeemInvitation({ plainToken, firstName, lastName, password, ema
         password,
         role: 'user',
         recoveryCodeHashes,
-        recoveryKeyHash: generateRecoveryKey(),
       }], { session });
       await auditService.record({
         action: 'invitation.redeem',

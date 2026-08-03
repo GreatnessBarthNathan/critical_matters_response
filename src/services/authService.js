@@ -77,6 +77,34 @@ function assistedResetMinutes() {
   return Number.isInteger(value) && value >= 1 && value <= 60 ? value : 15;
 }
 
+async function recordSuccessfulLogin(user, metadata, { verifiedTotp = false } = {}) {
+  const session = await mongoose.startSession();
+  try {
+    let updated;
+    await session.withTransaction(async () => {
+      updated = await User.findOneAndUpdate(
+        { _id: user._id, isActive: true },
+        { $set: { lastLoginAt: new Date() } },
+        { new: true, session },
+      );
+      if (!updated) throw authError('INVALID_CREDENTIALS', 401, 'The email or password is incorrect.');
+      await auditService.record({
+        actor: updated.id, actorRole: updated.role, action: 'auth.login', targetType: 'user', targetId: updated.id,
+        result: 'success', metadata: requestMetadata(metadata), session,
+      });
+      if (verifiedTotp) {
+        await auditService.record({
+          actor: updated.id, actorRole: updated.role, action: 'auth.totp.verify', targetType: 'user', targetId: updated.id,
+          result: 'success', metadata: requestMetadata(metadata), session,
+        });
+      }
+    });
+    return updated;
+  } finally {
+    await session.endSession();
+  }
+}
+
 async function login({ email, password, metadata } = {}) {
   const normalizedEmail = normalizeEmail(email);
   const user = await User.findOne({ email: normalizedEmail }).select('+password');
@@ -95,13 +123,7 @@ async function login({ email, password, metadata } = {}) {
     };
   }
 
-  user.lastLoginAt = new Date();
-  await user.save();
-  await bestEffortAudit({
-    actor: user.id, actorRole: user.role, action: 'auth.login', targetType: 'user', targetId: user.id,
-    result: 'success', metadata: requestMetadata(metadata),
-  });
-  return { user, requiresTotp: false };
+  return { user: await recordSuccessfulLogin(user, metadata), requiresTotp: false };
 }
 
 async function beginTotpSetup(user) {
@@ -178,13 +200,7 @@ async function verifyLoginTotp({ pendingToken, token, metadata } = {}) {
     throw invalidTotp();
   }
 
-  user.lastLoginAt = new Date();
-  await user.save();
-  await bestEffortAudit({
-    actor: user.id, actorRole: user.role, action: 'auth.totp.verify', targetType: 'user', targetId: user.id,
-    result: 'success', metadata: requestMetadata(metadata),
-  });
-  return { user };
+  return { user: await recordSuccessfulLogin(user, metadata, { verifiedTotp: true }) };
 }
 
 async function regenerateRecoveryCodes(user, metadata) {

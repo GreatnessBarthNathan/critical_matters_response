@@ -28,13 +28,19 @@ exports.listUsers = asyncHandler(async (_req, res) => {
 });
 
 exports.setUserStatus = asyncHandler(async (req, res) => {
-  const user = await User.findOne({ _id: req.params.id, role: 'user' });
+  const isActive = Boolean(req.body.isActive);
+  let user = await User.findOneAndUpdate(
+    { _id: req.params.id, role: 'user', isActive: { $ne: isActive } },
+    { $set: { isActive }, $inc: { sessionVersion: 1 } },
+    { new: true },
+  );
   if (!user) {
-    res.status(404);
-    throw new Error('User not found.');
+    user = await User.findOne({ _id: req.params.id, role: 'user' });
+    if (!user) {
+      res.status(404);
+      throw new Error('User not found.');
+    }
   }
-  user.isActive = Boolean(req.body.isActive);
-  await user.save();
   res.json({ user: user.toSafeObject(), message: `Account ${user.isActive ? 'activated' : 'deactivated'}.` });
 });
 
