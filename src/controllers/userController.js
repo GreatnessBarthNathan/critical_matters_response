@@ -37,7 +37,10 @@ exports.setUserStatus = asyncHandler(async (req, res) => {
     await session.withTransaction(async () => {
       user = await User.findOneAndUpdate(
         { _id: req.params.id, role: 'user', isActive: { $ne: isActive } },
-        { $set: { isActive }, $inc: { sessionVersion: 1 } },
+        {
+          $set: { isActive, 'pendingTotp.jtiHash': '', 'pendingTotp.expiresAt': null },
+          $inc: { sessionVersion: 1 },
+        },
         { new: true, session },
       );
       if (!user) {

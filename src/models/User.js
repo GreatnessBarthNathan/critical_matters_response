@@ -9,10 +9,15 @@ const userSchema = new mongoose.Schema({
   // Retained only so existing records can be read during migration. New accounts never receive a legacy recovery key.
   recoveryKeyHash: { type: String, select: false },
   sessionVersion: { type: Number, default: 0 },
-  recoveryCodeHashes: { type: [String], default: [], select: false },
+  // New entries are { fingerprint, bcryptHash }; legacy string hashes remain readable for a bounded migration fallback.
+  recoveryCodeHashes: { type: [mongoose.Schema.Types.Mixed], default: [], select: false },
   totp: {
     enabled: { type: Boolean, default: false },
     encryptedSecret: { type: String, default: '', select: false },
+  },
+  pendingTotp: {
+    jtiHash: { type: String, default: '', select: false },
+    expiresAt: Date,
   },
   assistedReset: {
     tokenHash: { type: String, default: '', select: false },

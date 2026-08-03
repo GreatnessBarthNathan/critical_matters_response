@@ -1,11 +1,10 @@
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const Invitation = require('../models/Invitation');
 const User = require('../models/User');
 const auditService = require('./auditService');
 const { hashToken } = require('../utils/crypto');
-const { generateRecoveryCodes } = require('./authService');
+const { generateRecoveryCodes, hashRecoveryCodes } = require('./authService');
 
 const INVALID_INVITATION = 'INVALID_INVITATION';
 const DEFAULT_TTL_DAYS = 7;
@@ -245,7 +244,7 @@ async function redeemInvitation({ plainToken, firstName, lastName, password, ema
         throw invalidInvitation();
       }
       const recoveryCodes = generateRecoveryCodes();
-      const recoveryCodeHashes = await Promise.all(recoveryCodes.map((code) => bcrypt.hash(code, 12)));
+      const recoveryCodeHashes = await hashRecoveryCodes(recoveryCodes);
       const user = await User.create([{
         firstName: firstName.trim(),
         lastName: lastName.trim(),

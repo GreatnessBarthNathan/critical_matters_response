@@ -53,7 +53,11 @@ exports.me = asyncHandler(async (req, res) => {
 });
 
 exports.beginTotpSetup = asyncHandler(async (req, res) => {
-  const result = await authService.beginTotpSetup(req.user);
+  const body = req.body || {};
+  const result = await authService.beginTotpSetup(req.user, {
+    currentPassword: body.currentPassword,
+    currentTotp: body.currentTotp || body.totpToken || body.token,
+  }, requestMetadata(req));
   setTotpSetupCookie(res, result.setupToken);
   res.json({ otpauthUrl: result.otpauthUrl, qrDataUrl: result.qrDataUrl });
 });

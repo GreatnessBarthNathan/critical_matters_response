@@ -30,13 +30,18 @@ test('audit metadata permits only safe fields and strips sensitive input', async
   });
 
   const event = await AuditEvent.findOne().lean();
-  assert.deepEqual(event.metadata, {
+  assert.deepEqual({
+    ...event.metadata,
+    userAgent: event.metadata.userAgent?.replace(/[0-9a-f]+$/, '<hash>'),
+  }, {
     ip: '127.0.0.1',
-    userAgent: 'CMR test',
+    userAgent: 'sha256:<hash>',
     requestId: 'request-123',
     reason: 'viewed assigned report',
     changedFields: ['status'],
   });
+  assert.match(event.metadata.userAgent, /^sha256:[a-f0-9]{64}$/);
+  assert.doesNotMatch(JSON.stringify(event), /CMR test|not-a-token/);
 });
 
 test('AuditEvent documents cannot be changed or deleted after creation', async (t) => {

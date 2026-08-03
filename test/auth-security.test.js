@@ -6,6 +6,7 @@ const User = require('../src/models/User');
 const AuditEvent = require('../src/models/AuditEvent');
 const { authenticator } = require('otplib');
 const auditService = require('../src/services/auditService');
+const authService = require('../src/services/authService');
 const seedPastor = require('../src/utils/seedPastor');
 const { encryptSecret, hashToken } = require('../src/utils/crypto');
 const { signToken } = require('../src/utils/authToken');
@@ -618,4 +619,114 @@ test('logout records a safe event and still clears every auth cookie if auditing
   } finally {
     auditService.record = originalRecord;
   }
+});
+
+test('fingerprinted recovery codes select one bcrypt candidate while unknown requests use the dummy pathway', async (t) => {
+  const app = await createTestApp(t);
+  const user = await createUser();
+  user.recoveryCodeHashes = await authService.hashRecoveryCodes(['FINGERPRINTED-RECOVERY-CODE']);
+  await user.save();
+  const bcrypt = require('bcryptjs');
+  const originalCompare = bcrypt.compare;
+  let comparisons = 0;
+  bcrypt.compare = async (...args) => {
+    comparisons += 1;
+    return originalCompare(...args);
+  };
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  try {
+    await request(app)
+      .post('/api/auth/recover-with-code')
+      .set('Cookie', csrfCookie)
+      .set('X-CSRF-Token', csrf.body.csrfToken)
+      .send({ email: 'unknown@example.test', recoveryCode: 'FINGERPRINTED-RECOVERY-CODE', newPassword: 'a newer secure password' })
+      .expect(400);
+    assert.equal(comparisons, 1);
+    comparisons = 0;
+    await request(app)
+      .post('/api/auth/recover-with-code')
+      .set('Cookie', csrfCookie)
+      .set('X-CSRF-Token', csrf.body.csrfToken)
+      .send({ email: user.email, recoveryCode: 'FINGERPRINTED-RECOVERY-CODE', newPassword: 'a newer secure password' })
+      .expect(200);
+    assert.equal(comparisons, 1);
+  } finally {
+    bcrypt.compare = originalCompare;
+  }
+});
+
+test('pending TOTP challenges are one-time, concurrent-safe, and invalidated by password recovery', async (t) => {
+  const app = await createTestApp(t);
+  const user = await createUser();
+  const secret = authenticator.generateSecret();
+  user.totp = { enabled: true, encryptedSecret: encryptSecret(secret) };
+  user.recoveryCodeHashes = await authService.hashRecoveryCodes(['PENDING-INVALIDATION-CODE']);
+  await user.save();
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const login = await request(app).post('/api/auth/login').send({ email: user.email, password: 'correct horse battery staple' }).expect(200);
+  const pendingCookie = login.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_pending='));
+  const verify = () => request(app)
+    .post('/api/auth/totp/verify-login')
+    .set('Cookie', [pendingCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: authenticator.generate(secret) });
+  const attempts = await Promise.all([verify(), verify()]);
+  assert.equal(attempts.filter((response) => response.status === 200).length, 1);
+  assert.equal(attempts.filter((response) => response.status === 401).length, 1);
+  await verify().expect(401);
+
+  const secondLogin = await request(app).post('/api/auth/login').send({ email: user.email, password: 'correct horse battery staple' }).expect(200);
+  const secondPending = secondLogin.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_pending='));
+  await request(app)
+    .post('/api/auth/recover-with-code')
+    .set('Cookie', csrfCookie)
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ email: user.email, recoveryCode: 'PENDING-INVALIDATION-CODE', newPassword: 'a newer secure password' })
+    .expect(200);
+  await request(app)
+    .post('/api/auth/totp/verify-login')
+    .set('Cookie', [secondPending, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: authenticator.generate(secret) })
+    .expect(401);
+});
+
+test('replacing an enabled TOTP secret requires the current password and current authenticator code', async (t) => {
+  const app = await createTestApp(t);
+  const user = await createUser();
+  const oldSecret = authenticator.generateSecret();
+  user.totp = { enabled: true, encryptedSecret: encryptSecret(oldSecret) };
+  await user.save();
+  const login = await request(app).post('/api/auth/login').send({ email: user.email, password: 'correct horse battery staple' }).expect(200);
+  const pendingCookie = login.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_pending='));
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const authCookie = await request(app)
+    .post('/api/auth/totp/verify-login')
+    .set('Cookie', [pendingCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: authenticator.generate(oldSecret) })
+    .expect(200)
+    .then((response) => response.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token=')));
+  for (const body of [
+    {},
+    { currentPassword: 'wrong password', currentTotp: authenticator.generate(oldSecret) },
+    { currentPassword: 'correct horse battery staple', currentTotp: '000000' },
+  ]) {
+    await request(app)
+      .post('/api/auth/totp/setup')
+      .set('Cookie', [authCookie, csrfCookie])
+      .set('X-CSRF-Token', csrf.body.csrfToken)
+      .send(body)
+      .expect(401);
+  }
+  const allowed = await request(app)
+    .post('/api/auth/totp/setup')
+    .set('Cookie', [authCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ currentPassword: 'correct horse battery staple', currentTotp: authenticator.generate(oldSecret) })
+    .expect(200);
+  assert.match(allowed.body.otpauthUrl, /^otpauth:\/\/totp\//);
 });

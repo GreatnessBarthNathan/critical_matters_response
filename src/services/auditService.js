@@ -1,4 +1,5 @@
 const AuditEvent = require('../models/AuditEvent');
+const crypto = require('crypto');
 
 const SAFE_METADATA_KEYS = new Set(['ip', 'userAgent', 'requestId', 'reason', 'changedFields']);
 const SENSITIVE_FIELD = /(?:title|content|body|response|pass(?:word)?|secret|token|cookie|recovery|totp)/i;
@@ -25,7 +26,13 @@ function safeMetadata(input) {
       }
       continue;
     }
-    if (typeof value === 'string') metadata[key] = value.slice(0, FIELD_LIMITS[key]);
+    if (typeof value !== 'string') continue;
+    if (key === 'userAgent') {
+      // User agents are caller-controlled and can contain arbitrary sensitive values. Retain only correlation.
+      metadata.userAgent = `sha256:${crypto.createHash('sha256').update(value.slice(0, FIELD_LIMITS.userAgent)).digest('hex')}`;
+    } else {
+      metadata[key] = value.slice(0, FIELD_LIMITS[key]);
+    }
   }
   return metadata;
 }

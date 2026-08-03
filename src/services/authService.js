@@ -11,6 +11,9 @@ const { signPurposeToken } = require('../utils/authToken');
 const HASH_ROUNDS = 12;
 const INVALID_RECOVERY = 'INVALID_RECOVERY';
 const INVALID_TOTP = 'INVALID_TOTP';
+const PENDING_TOTP_TTL_MS = 5 * 60 * 1000;
+// This is deliberately constant and valid: every unknown/missing candidate pays one bcrypt comparison.
+const RECOVERY_DUMMY_HASH = '$2b$12$5sD6F66jtGrHW1gHe9X9xetldC4v7s.VR7eNLv0qfQNQ8DFfFsH5i';
 
 function authError(code, status, message = code) {
   const error = new Error(message);
@@ -31,6 +34,12 @@ function normalizeRecoveryCode(value = '') {
   return String(value).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+function recoveryFingerprint(value) {
+  return crypto.createHmac('sha256', process.env.JWT_SECRET)
+    .update(`cmr:recovery-code:v1\0${normalizeRecoveryCode(value)}`)
+    .digest('base64url');
+}
+
 function generateRecoveryCodes() {
   return Array.from({ length: 8 }, () => {
     const compact = crypto.randomBytes(16).toString('hex').toUpperCase();
@@ -39,7 +48,10 @@ function generateRecoveryCodes() {
 }
 
 async function hashRecoveryCodes(codes) {
-  return Promise.all(codes.map((code) => bcrypt.hash(normalizeRecoveryCode(code), HASH_ROUNDS)));
+  return Promise.all(codes.map(async (code) => ({
+    fingerprint: recoveryFingerprint(code),
+    bcryptHash: await bcrypt.hash(normalizeRecoveryCode(code), HASH_ROUNDS),
+  })));
 }
 
 async function bestEffortAudit(input) {
@@ -77,22 +89,34 @@ function assistedResetMinutes() {
   return Number.isInteger(value) && value >= 1 && value <= 60 ? value : 15;
 }
 
-async function recordSuccessfulLogin(user, metadata, { verifiedTotp = false } = {}) {
+async function recordSuccessfulLogin(user, metadata, { pendingTotp } = {}) {
   const session = await mongoose.startSession();
   try {
     let updated;
     await session.withTransaction(async () => {
+      const filter = { _id: user._id, isActive: true };
+      const update = { $set: { lastLoginAt: new Date() } };
+      if (pendingTotp) {
+        Object.assign(filter, {
+          sessionVersion: pendingTotp.sv,
+          'pendingTotp.jtiHash': hashToken(pendingTotp.jti),
+          'pendingTotp.expiresAt': { $gt: new Date() },
+        });
+        Object.assign(update.$set, { 'pendingTotp.jtiHash': '', 'pendingTotp.expiresAt': null });
+      } else {
+        Object.assign(update.$set, { 'pendingTotp.jtiHash': '', 'pendingTotp.expiresAt': null });
+      }
       updated = await User.findOneAndUpdate(
-        { _id: user._id, isActive: true },
-        { $set: { lastLoginAt: new Date() } },
+        filter,
+        update,
         { new: true, session },
       );
-      if (!updated) throw authError('INVALID_CREDENTIALS', 401, 'The email or password is incorrect.');
+      if (!updated) throw pendingTotp ? invalidTotp() : authError('INVALID_CREDENTIALS', 401, 'The email or password is incorrect.');
       await auditService.record({
         actor: updated.id, actorRole: updated.role, action: 'auth.login', targetType: 'user', targetId: updated.id,
         result: 'success', metadata: requestMetadata(metadata), session,
       });
-      if (verifiedTotp) {
+      if (pendingTotp) {
         await auditService.record({
           actor: updated.id, actorRole: updated.role, action: 'auth.totp.verify', targetType: 'user', targetId: updated.id,
           result: 'success', metadata: requestMetadata(metadata), session,
@@ -100,6 +124,33 @@ async function recordSuccessfulLogin(user, metadata, { verifiedTotp = false } = 
       }
     });
     return updated;
+  } finally {
+    await session.endSession();
+  }
+}
+
+async function issuePendingTotpLogin(user, metadata) {
+  const jti = crypto.randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + PENDING_TOTP_TTL_MS);
+  const session = await mongoose.startSession();
+  try {
+    let updated;
+    await session.withTransaction(async () => {
+      updated = await User.findOneAndUpdate(
+        { _id: user._id, isActive: true, sessionVersion: user.sessionVersion, 'totp.enabled': true },
+        { $set: { 'pendingTotp.jtiHash': hashToken(jti), 'pendingTotp.expiresAt': expiresAt } },
+        { new: true, session },
+      );
+      if (!updated) throw authError('INVALID_CREDENTIALS', 401, 'The email or password is incorrect.');
+      await auditService.record({
+        actor: updated.id, actorRole: updated.role, action: 'auth.login.pending_totp', targetType: 'user', targetId: updated.id,
+        result: 'success', metadata: requestMetadata(metadata), session,
+      });
+    });
+    return {
+      user: updated,
+      pendingToken: signPurposeToken({ sub: updated.id, sv: updated.sessionVersion, purpose: 'totp-login', jti }, '5m'),
+    };
   } finally {
     await session.endSession();
   }
@@ -116,20 +167,34 @@ async function login({ email, password, metadata } = {}) {
   }
 
   if (user.totp?.enabled) {
-    return {
-      user,
-      requiresTotp: true,
-      pendingToken: signPurposeToken({ sub: user.id, purpose: 'totp-login' }, '5m'),
-    };
+    return { ...(await issuePendingTotpLogin(user, metadata)), requiresTotp: true };
   }
 
   return { user: await recordSuccessfulLogin(user, metadata), requiresTotp: false };
 }
 
-async function beginTotpSetup(user) {
+async function beginTotpSetup(user, { currentPassword, currentTotp } = {}, metadata) {
+  let replacementOf = '';
+  if (user.totp?.enabled) {
+    const currentUser = await User.findById(user.id || user._id).select('+password +totp.encryptedSecret');
+    let validTotp = false;
+    try {
+      validTotp = Boolean(currentUser && verifyTotp(decryptSecret(currentUser.totp.encryptedSecret), currentTotp));
+    } catch (_error) {
+      validTotp = false;
+    }
+    if (!currentUser || !(await currentUser.comparePassword(currentPassword || '')) || !validTotp) {
+      await bestEffortAudit({
+        actor: user.id || user._id, actorRole: user.role, action: 'auth.totp.replace', targetType: 'user', targetId: user.id || user._id,
+        result: 'failure', metadata: requestMetadata(metadata),
+      });
+      throw invalidTotp();
+    }
+    replacementOf = hashToken(currentUser.totp.encryptedSecret);
+  }
   const setup = createTotpSetup(user.email);
   const encryptedSecret = encryptSecret(setup.secret);
-  const setupToken = signPurposeToken({ sub: user.id || user._id, purpose: 'totp-setup', encryptedSecret }, '5m');
+  const setupToken = signPurposeToken({ sub: user.id || user._id, purpose: 'totp-setup', encryptedSecret, replacementOf }, '5m');
   // This is intentionally process-local convenience for service callers. HTTP callers receive the
   // same signed value only in the short-lived, HTTP-only setup cookie.
   user.$locals = user.$locals || {};
@@ -144,6 +209,14 @@ async function beginTotpSetup(user) {
 async function confirmTotpSetup(user, token, setupToken, metadata) {
   const setup = verifyPurposeToken(setupToken || user.$locals?.totpSetupToken, 'totp-setup');
   if (String(setup.sub) !== String(user.id || user._id) || typeof setup.encryptedSecret !== 'string') throw invalidTotp();
+
+  const currentState = await User.findById(user.id || user._id).select('+totp.encryptedSecret');
+  if (!currentState) throw invalidTotp();
+  if (currentState.totp?.enabled) {
+    if (!setup.replacementOf || hashToken(currentState.totp.encryptedSecret) !== setup.replacementOf) throw invalidTotp();
+  } else if (setup.replacementOf) {
+    throw invalidTotp();
+  }
 
   let secret;
   try {
@@ -183,8 +256,10 @@ async function confirmTotpSetup(user, token, setupToken, metadata) {
 
 async function verifyLoginTotp({ pendingToken, token, metadata } = {}) {
   const pending = verifyPurposeToken(pendingToken, 'totp-login');
-  const user = await User.findById(pending.sub).select('+totp.encryptedSecret');
-  if (!user || !user.isActive || !user.totp?.enabled || !user.totp.encryptedSecret) throw invalidTotp();
+  if (!Number.isInteger(pending.sv) || typeof pending.jti !== 'string' || pending.jti.length < 32) throw invalidTotp();
+  const user = await User.findById(pending.sub).select('+totp.encryptedSecret +pendingTotp.jtiHash');
+  if (!user || !user.isActive || user.sessionVersion !== pending.sv || !user.totp?.enabled || !user.totp.encryptedSecret
+    || user.pendingTotp?.jtiHash !== hashToken(pending.jti) || !user.pendingTotp?.expiresAt || user.pendingTotp.expiresAt <= new Date()) throw invalidTotp();
 
   let valid = false;
   try {
@@ -200,7 +275,7 @@ async function verifyLoginTotp({ pendingToken, token, metadata } = {}) {
     throw invalidTotp();
   }
 
-  return { user: await recordSuccessfulLogin(user, metadata, { verifiedTotp: true }) };
+  return { user: await recordSuccessfulLogin(user, metadata, { pendingTotp: pending }) };
 }
 
 async function regenerateRecoveryCodes(user, metadata) {
@@ -224,22 +299,36 @@ async function regenerateRecoveryCodes(user, metadata) {
 
 async function recoverWithCode({ email, recoveryCode, newPassword, metadata } = {}) {
   if (!normalizeEmail(email) || !recoveryCode || !validatePassword(newPassword)) {
+    await bcrypt.compare(normalizeRecoveryCode(recoveryCode), RECOVERY_DUMMY_HASH);
     await bestEffortAudit({ action: 'auth.recovery.code', targetType: 'user', targetId: 'unknown', result: 'failure', metadata: requestMetadata(metadata) });
     throw invalidRecovery();
   }
-  const user = await User.findOne({ email: normalizeEmail(email), isActive: true }).select('+recoveryCodeHashes');
-  const values = [String(recoveryCode).trim(), normalizeRecoveryCode(recoveryCode)].filter(Boolean);
-  let matchedHash;
-  if (user) {
-    for (const hash of user.recoveryCodeHashes) {
-      // Support invitation-era URL-safe codes while storing newly generated codes in a typed format.
-      if ((await Promise.all(values.map((value) => bcrypt.compare(value, hash)))).some(Boolean)) {
-        matchedHash = hash;
-        break;
+  const normalizedCode = normalizeRecoveryCode(recoveryCode);
+  const fingerprint = recoveryFingerprint(normalizedCode);
+  let user = await User.findOne({
+    email: normalizeEmail(email), isActive: true, 'recoveryCodeHashes.fingerprint': fingerprint,
+  }).select('+recoveryCodeHashes');
+  let matchedEntry = user?.recoveryCodeHashes.find((entry) => entry?.fingerprint === fingerprint);
+  let valid = matchedEntry ? await bcrypt.compare(normalizedCode, matchedEntry.bcryptHash) : false;
+
+  // Existing pre-fingerprint records can still be used during migration, but the fallback is deliberately bounded.
+  if (!user) {
+    const legacyUser = await User.findOne({ email: normalizeEmail(email), isActive: true }).select('+recoveryCodeHashes');
+    const legacyHashes = legacyUser?.recoveryCodeHashes.filter((entry) => typeof entry === 'string').slice(0, 8) || [];
+    if (legacyHashes.length) {
+      for (const legacyHash of legacyHashes) {
+        if (await bcrypt.compare(String(recoveryCode).trim(), legacyHash)) {
+          user = legacyUser;
+          matchedEntry = legacyHash;
+          valid = true;
+          break;
+        }
       }
+    } else {
+      await bcrypt.compare(normalizedCode, RECOVERY_DUMMY_HASH);
     }
   }
-  if (!user || !matchedHash) {
+  if (!user || !matchedEntry || !valid) {
     await bestEffortAudit({ action: 'auth.recovery.code', targetType: 'user', targetId: 'unknown', result: 'failure', metadata: requestMetadata(metadata) });
     throw invalidRecovery();
   }
@@ -250,8 +339,12 @@ async function recoverWithCode({ email, recoveryCode, newPassword, metadata } = 
     let updated;
     await session.withTransaction(async () => {
       updated = await User.findOneAndUpdate(
-        { _id: user._id, isActive: true, recoveryCodeHashes: matchedHash },
-        { $pull: { recoveryCodeHashes: matchedHash }, $set: { password: passwordHash, passwordChangedAt: new Date() }, $inc: { sessionVersion: 1 } },
+        { _id: user._id, isActive: true, recoveryCodeHashes: matchedEntry },
+        {
+          $pull: { recoveryCodeHashes: matchedEntry },
+          $set: { password: passwordHash, passwordChangedAt: new Date(), 'pendingTotp.jtiHash': '', 'pendingTotp.expiresAt': null },
+          $inc: { sessionVersion: 1 },
+        },
         { new: true, session },
       );
       if (!updated) throw invalidRecovery();
@@ -311,7 +404,10 @@ async function completeAssistedReset({ email, resetCode, newPassword, metadata }
           'assistedReset.expiresAt': { $gt: new Date() },
         },
         {
-          $set: { password: passwordHash, passwordChangedAt: new Date(), 'assistedReset.tokenHash': '', 'assistedReset.expiresAt': null },
+          $set: {
+            password: passwordHash, passwordChangedAt: new Date(), 'assistedReset.tokenHash': '', 'assistedReset.expiresAt': null,
+            'pendingTotp.jtiHash': '', 'pendingTotp.expiresAt': null,
+          },
           $inc: { sessionVersion: 1 },
         },
         { new: true, session },
@@ -350,7 +446,10 @@ async function changePassword({ user, currentPassword, newPassword, metadata } =
     await session.withTransaction(async () => {
       updated = await User.findByIdAndUpdate(
         currentUser._id,
-        { $set: { password: passwordHash, passwordChangedAt: new Date() }, $inc: { sessionVersion: 1 } },
+        {
+          $set: { password: passwordHash, passwordChangedAt: new Date(), 'pendingTotp.jtiHash': '', 'pendingTotp.expiresAt': null },
+          $inc: { sessionVersion: 1 },
+        },
         { new: true, session },
       );
       await auditService.record({
@@ -370,6 +469,8 @@ module.exports = {
   normalizeEmail,
   validatePassword,
   generateRecoveryCodes,
+  hashRecoveryCodes,
+  recoveryFingerprint,
   login,
   beginTotpSetup,
   confirmTotpSetup,
