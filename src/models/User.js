@@ -13,6 +13,7 @@ const userSchema = new mongoose.Schema({
   recoveryCodeHashes: { type: [mongoose.Schema.Types.Mixed], default: [], select: false },
   totp: {
     enabled: { type: Boolean, default: false },
+    version: { type: Number, default: 0 },
     encryptedSecret: { type: String, default: '', select: false },
   },
   pendingTotp: {

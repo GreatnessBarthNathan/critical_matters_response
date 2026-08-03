@@ -14,6 +14,7 @@ const INVALID_TOTP = 'INVALID_TOTP';
 const PENDING_TOTP_TTL_MS = 5 * 60 * 1000;
 // This is deliberately constant and valid: every unknown/missing candidate pays one bcrypt comparison.
 const RECOVERY_DUMMY_HASH = '$2b$12$5sD6F66jtGrHW1gHe9X9xetldC4v7s.VR7eNLv0qfQNQ8DFfFsH5i';
+const LOGIN_DUMMY_HASH = RECOVERY_DUMMY_HASH;
 
 function authError(code, status, message = code) {
   const error = new Error(message);
@@ -34,8 +35,25 @@ function normalizeRecoveryCode(value = '') {
   return String(value).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-function recoveryFingerprint(value) {
-  return crypto.createHmac('sha256', process.env.JWT_SECRET)
+function recoveryKeyId(pepper) {
+  return crypto.createHash('sha256').update(`cmr:recovery-code:key-id:v1\0${pepper}`).digest('base64url').slice(0, 22);
+}
+
+function recoveryPepperRing() {
+  const current = process.env.RECOVERY_CODE_PEPPER;
+  if (typeof current !== 'string' || Buffer.byteLength(current, 'utf8') < 32) {
+    throw new Error('RECOVERY_CODE_PEPPER must be configured with at least 32 bytes');
+  }
+  const previous = String(process.env.RECOVERY_CODE_PREVIOUS_PEPPERS || '').split(',').map((value) => value.trim()).filter(Boolean);
+  const peppers = [current, ...previous];
+  if (peppers.some((pepper) => Buffer.byteLength(pepper, 'utf8') < 32)) {
+    throw new Error('RECOVERY_CODE_PREVIOUS_PEPPERS entries must be at least 32 bytes');
+  }
+  return peppers.map((pepper) => ({ pepper, keyId: recoveryKeyId(pepper) }));
+}
+
+function recoveryFingerprint(value, pepper = recoveryPepperRing()[0].pepper) {
+  return crypto.createHmac('sha256', pepper)
     .update(`cmr:recovery-code:v1\0${normalizeRecoveryCode(value)}`)
     .digest('base64url');
 }
@@ -48,8 +66,10 @@ function generateRecoveryCodes() {
 }
 
 async function hashRecoveryCodes(codes) {
+  const currentKey = recoveryPepperRing()[0];
   return Promise.all(codes.map(async (code) => ({
-    fingerprint: recoveryFingerprint(code),
+    keyId: currentKey.keyId,
+    fingerprint: recoveryFingerprint(code, currentKey.pepper),
     bcryptHash: await bcrypt.hash(normalizeRecoveryCode(code), HASH_ROUNDS),
   })));
 }
@@ -159,7 +179,8 @@ async function issuePendingTotpLogin(user, metadata) {
 async function login({ email, password, metadata } = {}) {
   const normalizedEmail = normalizeEmail(email);
   const user = await User.findOne({ email: normalizedEmail }).select('+password');
-  if (!user || !user.isActive || !(await user.comparePassword(password || ''))) {
+  const passwordMatches = user?.isActive ? await user.comparePassword(password || '') : await bcrypt.compare(String(password || ''), LOGIN_DUMMY_HASH);
+  if (!user || !user.isActive || !passwordMatches) {
     await bestEffortAudit({
       action: 'auth.login', targetType: 'user', targetId: 'unknown', result: 'failure', metadata: requestMetadata(metadata),
     });
@@ -174,16 +195,20 @@ async function login({ email, password, metadata } = {}) {
 }
 
 async function beginTotpSetup(user, { currentPassword, currentTotp } = {}, metadata) {
+  const currentUser = await User.findById(user.id || user._id).select('+password +totp.encryptedSecret');
+  if (!currentUser || currentUser.sessionVersion !== user.sessionVersion || !currentUser.isActive) throw invalidTotp();
+  const expectedEnabled = Boolean(currentUser.totp?.enabled);
+  const expectedVersion = Number.isInteger(currentUser.totp?.version) ? currentUser.totp.version : 0;
   let replacementOf = '';
-  if (user.totp?.enabled) {
-    const currentUser = await User.findById(user.id || user._id).select('+password +totp.encryptedSecret');
+  const expectedEncryptedSecret = expectedEnabled ? currentUser.totp.encryptedSecret : '';
+  if (expectedEnabled) {
     let validTotp = false;
     try {
-      validTotp = Boolean(currentUser && verifyTotp(decryptSecret(currentUser.totp.encryptedSecret), currentTotp));
+      validTotp = verifyTotp(decryptSecret(currentUser.totp.encryptedSecret), currentTotp);
     } catch (_error) {
       validTotp = false;
     }
-    if (!currentUser || !(await currentUser.comparePassword(currentPassword || '')) || !validTotp) {
+    if (!(await currentUser.comparePassword(currentPassword || '')) || !validTotp) {
       await bestEffortAudit({
         actor: user.id || user._id, actorRole: user.role, action: 'auth.totp.replace', targetType: 'user', targetId: user.id || user._id,
         result: 'failure', metadata: requestMetadata(metadata),
@@ -194,7 +219,10 @@ async function beginTotpSetup(user, { currentPassword, currentTotp } = {}, metad
   }
   const setup = createTotpSetup(user.email);
   const encryptedSecret = encryptSecret(setup.secret);
-  const setupToken = signPurposeToken({ sub: user.id || user._id, purpose: 'totp-setup', encryptedSecret, replacementOf }, '5m');
+  const setupToken = signPurposeToken({
+    sub: user.id || user._id, purpose: 'totp-setup', encryptedSecret, replacementOf,
+    expectedEncryptedSecret, sv: currentUser.sessionVersion, totpVersion: expectedVersion, totpEnabled: expectedEnabled,
+  }, '5m');
   // This is intentionally process-local convenience for service callers. HTTP callers receive the
   // same signed value only in the short-lived, HTTP-only setup cookie.
   user.$locals = user.$locals || {};
@@ -208,15 +236,9 @@ async function beginTotpSetup(user, { currentPassword, currentTotp } = {}, metad
 
 async function confirmTotpSetup(user, token, setupToken, metadata) {
   const setup = verifyPurposeToken(setupToken || user.$locals?.totpSetupToken, 'totp-setup');
-  if (String(setup.sub) !== String(user.id || user._id) || typeof setup.encryptedSecret !== 'string') throw invalidTotp();
-
-  const currentState = await User.findById(user.id || user._id).select('+totp.encryptedSecret');
-  if (!currentState) throw invalidTotp();
-  if (currentState.totp?.enabled) {
-    if (!setup.replacementOf || hashToken(currentState.totp.encryptedSecret) !== setup.replacementOf) throw invalidTotp();
-  } else if (setup.replacementOf) {
-    throw invalidTotp();
-  }
+  if (String(setup.sub) !== String(user.id || user._id) || typeof setup.encryptedSecret !== 'string'
+    || typeof setup.expectedEncryptedSecret !== 'string' || !Number.isInteger(setup.sv)
+    || !Number.isInteger(setup.totpVersion) || typeof setup.totpEnabled !== 'boolean') throw invalidTotp();
 
   let secret;
   try {
@@ -238,11 +260,20 @@ async function confirmTotpSetup(user, token, setupToken, metadata) {
   try {
     let updated;
     await session.withTransaction(async () => {
-      updated = await User.findByIdAndUpdate(
-        user.id || user._id,
-        { $set: { 'totp.enabled': true, 'totp.encryptedSecret': setup.encryptedSecret, recoveryCodeHashes } },
+      const filter = {
+        _id: user.id || user._id, isActive: true, sessionVersion: setup.sv,
+        'totp.version': setup.totpVersion, 'totp.enabled': setup.totpEnabled,
+      };
+      if (setup.totpEnabled) Object.assign(filter, { 'totp.encryptedSecret': setup.expectedEncryptedSecret });
+      updated = await User.findOneAndUpdate(
+        filter,
+        {
+          $set: { 'totp.enabled': true, 'totp.encryptedSecret': setup.encryptedSecret, recoveryCodeHashes },
+          $inc: { 'totp.version': 1 },
+        },
         { new: true, session },
       );
+      if (!updated) throw invalidTotp();
       await auditService.record({
         actor: user.id || user._id, actorRole: user.role, action: 'auth.totp.enable', targetType: 'user', targetId: user.id || user._id,
         result: 'success', metadata: requestMetadata(metadata), session,
@@ -304,11 +335,15 @@ async function recoverWithCode({ email, recoveryCode, newPassword, metadata } = 
     throw invalidRecovery();
   }
   const normalizedCode = normalizeRecoveryCode(recoveryCode);
-  const fingerprint = recoveryFingerprint(normalizedCode);
+  const recoveryKeys = recoveryPepperRing();
+  const candidates = recoveryKeys.map((key) => ({ keyId: key.keyId, fingerprint: recoveryFingerprint(normalizedCode, key.pepper) }));
   let user = await User.findOne({
-    email: normalizeEmail(email), isActive: true, 'recoveryCodeHashes.fingerprint': fingerprint,
+    email: normalizeEmail(email), isActive: true,
+    $or: candidates.map((candidate) => ({ recoveryCodeHashes: { $elemMatch: candidate } })),
   }).select('+recoveryCodeHashes');
-  let matchedEntry = user?.recoveryCodeHashes.find((entry) => entry?.fingerprint === fingerprint);
+  let matchedEntry = user?.recoveryCodeHashes.find((entry) => candidates.some((candidate) => (
+    entry?.keyId === candidate.keyId && entry?.fingerprint === candidate.fingerprint
+  )));
   let valid = matchedEntry ? await bcrypt.compare(normalizedCode, matchedEntry.bcryptHash) : false;
 
   // Existing pre-fingerprint records can still be used during migration, but the fallback is deliberately bounded.

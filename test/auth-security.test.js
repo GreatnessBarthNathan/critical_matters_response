@@ -730,3 +730,131 @@ test('replacing an enabled TOTP secret requires the current password and current
     .expect(200);
   assert.match(allowed.body.otpauthUrl, /^otpauth:\/\/totp\//);
 });
+
+test('TOTP setup confirmation has one winner and stale setup state cannot survive password rotation', async (t) => {
+  const app = await createTestApp(t);
+  await createUser();
+  const authCookie = await signIn(app);
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const setup = await request(app)
+    .post('/api/auth/totp/setup')
+    .set('Cookie', [authCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .expect(200);
+  const setupCookie = setup.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_setup='));
+  const secret = new URL(setup.body.otpauthUrl).searchParams.get('secret');
+  const confirm = () => request(app)
+    .post('/api/auth/totp/confirm')
+    .set('Cookie', [authCookie, csrfCookie, setupCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: authenticator.generate(secret) });
+  const confirmations = await Promise.all([confirm(), confirm()]);
+  assert.equal(confirmations.filter((response) => response.status === 200).length, 1);
+  assert.equal(confirmations.filter((response) => response.status === 401).length, 1);
+
+  const secondUser = await User.create({ firstName: 'Second', lastName: 'Leader', email: 'second@example.test', password: 'correct horse battery staple' });
+  const secondCookie = await request(app).post('/api/auth/login').send({ email: secondUser.email, password: 'correct horse battery staple' })
+    .expect(200).then((response) => response.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token=')));
+  const staleSetup = await request(app)
+    .post('/api/auth/totp/setup')
+    .set('Cookie', [secondCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .expect(200);
+  const refreshed = await request(app)
+    .patch('/api/auth/change-password')
+    .set('Cookie', [secondCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ currentPassword: 'correct horse battery staple', newPassword: 'a newer secure password' })
+    .expect(200);
+  const refreshedCookie = refreshed.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token='));
+  const staleSecret = new URL(staleSetup.body.otpauthUrl).searchParams.get('secret');
+  await request(app)
+    .post('/api/auth/totp/confirm')
+    .set('Cookie', [refreshedCookie, csrfCookie, staleSetup.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_setup='))])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: authenticator.generate(staleSecret) })
+    .expect(401);
+});
+
+test('replacement TOTP confirmation is compare-and-set under concurrent confirmation', async (t) => {
+  const app = await createTestApp(t);
+  const user = await createUser();
+  const oldSecret = authenticator.generateSecret();
+  user.totp = { enabled: true, version: 0, encryptedSecret: encryptSecret(oldSecret) };
+  await user.save();
+  const login = await request(app).post('/api/auth/login').send({ email: user.email, password: 'correct horse battery staple' }).expect(200);
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const authCookie = await request(app)
+    .post('/api/auth/totp/verify-login')
+    .set('Cookie', [login.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_pending=')), csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: authenticator.generate(oldSecret) })
+    .expect(200)
+    .then((response) => response.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token=')));
+  const setup = await request(app)
+    .post('/api/auth/totp/setup')
+    .set('Cookie', [authCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ currentPassword: 'correct horse battery staple', currentTotp: authenticator.generate(oldSecret) })
+    .expect(200);
+  const setupCookie = setup.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_setup='));
+  const newSecret = new URL(setup.body.otpauthUrl).searchParams.get('secret');
+  const confirm = () => request(app)
+    .post('/api/auth/totp/confirm')
+    .set('Cookie', [authCookie, csrfCookie, setupCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: authenticator.generate(newSecret) });
+  const confirmations = await Promise.all([confirm(), confirm()]);
+  assert.equal(confirmations.filter((response) => response.status === 200).length, 1);
+  assert.equal(confirmations.filter((response) => response.status === 401).length, 1);
+  assert.equal((await User.findById(user.id)).totp.version, 1);
+});
+
+test('recovery peppers rotate independently from JWT and login failures use one bcrypt comparison', async (t) => {
+  const app = await createTestApp(t);
+  const oldPepper = process.env.RECOVERY_CODE_PEPPER;
+  const oldPrevious = process.env.RECOVERY_CODE_PREVIOUS_PEPPERS;
+  const user = await createUser();
+  try {
+    process.env.RECOVERY_CODE_PEPPER = 'a'.repeat(40);
+    process.env.RECOVERY_CODE_PREVIOUS_PEPPERS = '';
+    const oldEntry = (await authService.hashRecoveryCodes(['ROTATED-RECOVERY-CODE']))[0];
+    user.recoveryCodeHashes = [oldEntry];
+    await user.save();
+    process.env.RECOVERY_CODE_PEPPER = 'b'.repeat(40);
+    process.env.RECOVERY_CODE_PREVIOUS_PEPPERS = 'a'.repeat(40);
+    const newEntry = (await authService.hashRecoveryCodes(['NEW-ROTATED-RECOVERY-CODE']))[0];
+    assert.notEqual(newEntry.keyId, oldEntry.keyId);
+    const csrf = await request(app).get('/api/auth/csrf').expect(200);
+    const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+    await request(app)
+      .post('/api/auth/recover-with-code')
+      .set('Cookie', csrfCookie)
+      .set('X-CSRF-Token', csrf.body.csrfToken)
+      .send({ email: user.email, recoveryCode: 'ROTATED-RECOVERY-CODE', newPassword: 'a newer secure password' })
+      .expect(200);
+
+    const bcrypt = require('bcryptjs');
+    const originalCompare = bcrypt.compare;
+    let comparisons = 0;
+    bcrypt.compare = async (...args) => { comparisons += 1; return originalCompare(...args); };
+    try {
+      for (const email of ['unknown@example.test', user.email]) {
+        await request(app).post('/api/auth/login').send({ email, password: 'incorrect password' }).expect(401);
+        assert.equal(comparisons, 1);
+        comparisons = 0;
+      }
+      await User.updateOne({ _id: user.id }, { isActive: false });
+      await request(app).post('/api/auth/login').send({ email: user.email, password: 'incorrect password' }).expect(401);
+      assert.equal(comparisons, 1);
+    } finally {
+      bcrypt.compare = originalCompare;
+    }
+  } finally {
+    process.env.RECOVERY_CODE_PEPPER = oldPepper;
+    if (oldPrevious === undefined) delete process.env.RECOVERY_CODE_PREVIOUS_PEPPERS;
+    else process.env.RECOVERY_CODE_PREVIOUS_PEPPERS = oldPrevious;
+  }
+});

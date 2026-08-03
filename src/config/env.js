@@ -19,6 +19,14 @@ function decodeTotpEncryptionKey(value) {
   }
 }
 
+function validateRecoveryPeppers(env) {
+  validateSecret('RECOVERY_CODE_PEPPER', env.RECOVERY_CODE_PEPPER);
+  if (!env.RECOVERY_CODE_PREVIOUS_PEPPERS) return;
+  for (const pepper of env.RECOVERY_CODE_PREVIOUS_PEPPERS.split(',').map((value) => value.trim()).filter(Boolean)) {
+    validateSecret('RECOVERY_CODE_PREVIOUS_PEPPERS entry', pepper);
+  }
+}
+
 function parseTrustProxyHops(value) {
   if (value === undefined || value === '') return 0;
   if (!/^(?:0|[1-9]\d?)$/.test(String(value)) || Number(value) > 10) {
@@ -30,13 +38,14 @@ function parseTrustProxyHops(value) {
 function getConfig(env = process.env) {
   const production = env.NODE_ENV === 'production';
   const required = ['MONGODB_URI', 'JWT_SECRET'];
-  if (production) required.push('CSRF_SECRET', 'TOTP_ENCRYPTION_KEY');
+  if (production) required.push('CSRF_SECRET', 'TOTP_ENCRYPTION_KEY', 'RECOVERY_CODE_PEPPER');
   const missing = required.filter((key) => !env[key]);
   if (missing.length) throw new Error(`Missing required environment values: ${missing.join(', ')}`);
   if (production) {
     validateSecret('JWT_SECRET', env.JWT_SECRET);
     validateSecret('CSRF_SECRET', env.CSRF_SECRET);
     decodeTotpEncryptionKey(env.TOTP_ENCRYPTION_KEY);
+    validateRecoveryPeppers(env);
   }
 
   const port = Number(env.PORT || 5000);
@@ -47,4 +56,4 @@ function getConfig(env = process.env) {
   return { production, port, mongodbUri: env.MONGODB_URI, trustProxyHops: parseTrustProxyHops(env.TRUST_PROXY_HOPS) };
 }
 
-module.exports = { getConfig, parseTrustProxyHops };
+module.exports = { getConfig, parseTrustProxyHops, validateRecoveryPeppers };

@@ -84,13 +84,15 @@ After the first production deployment, keep the environment variables in your pl
 
 ## Password recovery without email
 
-Registration displays a recovery key once. The user must save it. The forgot-password page asks for:
+Invitation redemption and TOTP enrollment display eight one-time recovery codes once. The user must save them. Recovery asks for:
 
 - the account email;
-- the saved recovery key; and
+- one unused recovery code; and
 - a new password.
 
-The recovery key is stored as a bcrypt hash and cannot be read from the database. No confirmation or password-recovery email is sent.
+New codes are stored as a pepper-keyed HMAC lookup fingerprint plus an individual bcrypt hash, so only one candidate requires password-hash verification. `RECOVERY_CODE_PEPPER` is independent from `JWT_SECRET`; during a planned pepper rotation, put the old pepper in `RECOVERY_CODE_PREVIOUS_PEPPERS` until codes made under it have expired or been regenerated.
+
+The bounded (maximum eight) legacy string-hash recovery fallback is a temporary migration bridge for pre-fingerprint accounts. It should be removed after all legacy accounts have regenerated their recovery codes. No confirmation or password-recovery email is sent.
 
 ## Production deployment (one application)
 
@@ -115,7 +117,7 @@ Typical platform settings:
 - Every non-pastor report query is scoped by the authenticated user's database ID.
 - Only the report owner and a pastor can view or reply to a report.
 - Only a pastor can view all reports, change statuses, or manage member access.
-- Passwords and recovery keys use bcrypt with a cost factor of 12.
+- Passwords and recovery codes use bcrypt with a cost factor of 12.
 - Sessions use signed JWTs in HTTP-only, same-site cookies.
 - Authentication endpoints are rate-limited.
 - Helmet supplies production security headers.
