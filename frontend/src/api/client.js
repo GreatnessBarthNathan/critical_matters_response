@@ -3,12 +3,36 @@ let csrfRequest;
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+export class ApiError extends Error {
+  constructor({ status, code, message, fields, requestId }) {
+    super(message || 'Something went wrong. Please try again.');
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code || 'UNKNOWN_ERROR';
+    this.fields = fields || {};
+    this.requestId = requestId;
+  }
+
+  /** True when retrying the same request could plausibly succeed, so forms keep their values. */
+  get retryable() {
+    return this.status >= 500 || this.status === 429 || this.code === 'CSRF_INVALID';
+  }
+
+  get sessionExpired() {
+    return this.status === 401;
+  }
+}
+
+// The API answers with { error: { code, message, fields, requestId } }.
 function errorDetails(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
-  if (data.error && typeof data.error === 'object' && !Array.isArray(data.error)) {
-    return { code: data.code || data.error.code, message: data.message || data.error.message };
-  }
-  return { code: data.code, message: data.message };
+  const envelope = data.error && typeof data.error === 'object' && !Array.isArray(data.error) ? data.error : data;
+  return {
+    code: envelope.code,
+    message: envelope.message,
+    fields: envelope.fields,
+    requestId: envelope.requestId,
+  };
 }
 
 export function isCsrfInvalidError(data) {
@@ -16,11 +40,7 @@ export function isCsrfInvalidError(data) {
 }
 
 function toError(response, data) {
-  const { code, message } = errorDetails(data);
-  const error = new Error(message || 'Something went wrong. Please try again.');
-  error.status = response.status;
-  error.code = code;
-  return error;
+  return new ApiError({ status: response.status, ...errorDetails(data) });
 }
 
 async function refreshCsrfToken() {
@@ -33,7 +53,7 @@ async function refreshCsrfToken() {
 
 async function getCsrfToken({ force = false } = {}) {
   if (!force && csrfToken) return csrfToken;
-  if (csrfRequest) await csrfRequest;
+  if (csrfRequest) await csrfRequest.catch(() => undefined);
   if (!force && csrfToken) return csrfToken;
 
   csrfRequest = refreshCsrfToken();
@@ -42,6 +62,19 @@ async function getCsrfToken({ force = false } = {}) {
   } finally {
     csrfRequest = undefined;
   }
+}
+
+/** Called by AuthProvider on start and after every authentication change. */
+export async function bootstrapCsrf() {
+  try {
+    return await getCsrfToken({ force: true });
+  } catch {
+    return undefined;
+  }
+}
+
+export function clearCsrfToken() {
+  csrfToken = undefined;
 }
 
 async function send(path, options, token) {
@@ -66,6 +99,7 @@ export async function api(path, options = {}) {
   let token = requiresCsrf ? await getCsrfToken() : undefined;
   let { response, data } = await send(path, options, token);
 
+  // A rotated or missing CSRF cookie is recoverable exactly once, transparently.
   if (!response.ok && requiresCsrf && isCsrfInvalidError(data)) {
     token = await getCsrfToken({ force: true });
     ({ response, data } = await send(path, options, token));

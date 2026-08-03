@@ -1,9 +1,10 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import DashboardLayout from './components/DashboardLayout';
-import LandingPage from './pages/LandingPage';
+import RootRedirect from './components/RootRedirect';
 import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
+import TwoFactorPage from './pages/TwoFactorPage';
+import InvitationPage from './pages/InvitationPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import DashboardPage from './pages/DashboardPage';
 import CreateReportPage from './pages/CreateReportPage';
@@ -16,10 +17,13 @@ import HelpPage from './pages/HelpPage';
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
+      {/* No public landing page and no public registration. */}
+      <Route path="/" element={<RootRedirect />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/verify-two-factor" element={<TwoFactorPage />} />
+      <Route path="/invite/:token" element={<InvitationPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+
       <Route element={<ProtectedRoute />}>
         <Route path="/app" element={<DashboardLayout />}>
           <Route index element={<DashboardPage />} />
@@ -32,6 +36,7 @@ export default function App() {
           <Route path="help" element={<HelpPage />} />
         </Route>
       </Route>
+
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
