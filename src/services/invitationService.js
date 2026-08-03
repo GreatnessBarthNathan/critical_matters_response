@@ -82,51 +82,72 @@ async function createInvitation({ email, pastor, ip, userAgent }) {
     throw error;
   }
 
-  const now = new Date();
-  const replacedInvitations = await Invitation.find({
-    email: normalizedEmail, active: true, consumedAt: null, revokedAt: null, expiresAt: { $gt: now },
-  }).select('_id');
-  await Invitation.updateMany(
-    { email: normalizedEmail, active: true, consumedAt: null, revokedAt: null, expiresAt: { $gt: now } },
-    { $set: { active: false, revokedAt: now } },
-  );
-  await Invitation.updateMany(
-    { email: normalizedEmail, active: true, expiresAt: { $lte: now } },
-    { $set: { active: false } },
-  );
-  await Promise.all(replacedInvitations.map((replaced) => auditService.record({
-    actor: pastor._id || pastor.id,
-    actorRole: 'pastor',
-    action: 'invitation.revoke',
-    targetType: 'invitation',
-    targetId: replaced.id,
-    result: 'success',
-    metadata: safeMetadata(ip, userAgent),
-  })));
   const plainToken = generateInvitationToken();
-  let invitation;
+  const session = await mongoose.startSession();
   try {
-    invitation = await Invitation.create({
-      email: normalizedEmail,
-      tokenHash: hashToken(plainToken),
-      createdBy: pastor._id || pastor.id,
-      expiresAt: new Date(now.getTime() + invitationTtlDays() * 24 * 60 * 60 * 1000),
-      active: true,
-    });
+    let result;
+    // A duplicate-key collision means another replacement committed first. Retry
+    // once so this completed call can intentionally supersede that invitation.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await session.withTransaction(async () => {
+          const now = new Date();
+          const replacedInvitations = await Invitation.find({
+            email: normalizedEmail, active: true, consumedAt: null, revokedAt: null, expiresAt: { $gt: now },
+          }).select('_id').session(session);
+          await Invitation.updateMany(
+            { email: normalizedEmail, active: true, consumedAt: null, revokedAt: null, expiresAt: { $gt: now } },
+            { $set: { active: false, revokedAt: now } },
+            { session },
+          );
+          await Invitation.updateMany(
+            { email: normalizedEmail, active: true, expiresAt: { $lte: now } },
+            { $set: { active: false } },
+            { session },
+          );
+          for (const replaced of replacedInvitations) {
+            await auditService.record({
+              actor: pastor._id || pastor.id,
+              actorRole: 'pastor',
+              action: 'invitation.revoke',
+              targetType: 'invitation',
+              targetId: replaced.id,
+              result: 'success',
+              metadata: safeMetadata(ip, userAgent),
+              session,
+            });
+          }
+          const [invitation] = await Invitation.create([{
+            email: normalizedEmail,
+            tokenHash: hashToken(plainToken),
+            createdBy: pastor._id || pastor.id,
+            expiresAt: new Date(now.getTime() + invitationTtlDays() * 24 * 60 * 60 * 1000),
+            active: true,
+          }], { session });
+          await auditService.record({
+            actor: pastor._id || pastor.id,
+            actorRole: 'pastor',
+            action: 'invitation.create',
+            targetType: 'invitation',
+            targetId: invitation.id,
+            result: 'success',
+            metadata: safeMetadata(ip, userAgent),
+            session,
+          });
+          result = { invitation, plainToken };
+        });
+        return result;
+      } catch (error) {
+        if (error.code !== 11000 || attempt === 1) throw error;
+      }
+    }
   } catch (error) {
     if (error.code === 11000) throw invitationConflict();
     throw error;
+  } finally {
+    await session.endSession();
   }
-  await auditService.record({
-    actor: pastor._id || pastor.id,
-    actorRole: 'pastor',
-    action: 'invitation.create',
-    targetType: 'invitation',
-    targetId: invitation.id,
-    result: 'success',
-    metadata: safeMetadata(ip, userAgent),
-  });
-  return { invitation, plainToken };
+  throw invitationConflict();
 }
 
 async function listInvitations({ page = 1, limit = 20 } = {}) {
@@ -151,27 +172,36 @@ async function listInvitations({ page = 1, limit = 20 } = {}) {
 }
 
 async function revokeInvitation({ invitationId, pastor, ip, userAgent }) {
-  const invitation = await Invitation.findOneAndUpdate(
-    { _id: invitationId, active: true, consumedAt: null, revokedAt: null },
-    { $set: { active: false, revokedAt: new Date() } },
-    { new: true },
-  );
-  if (!invitation) {
-    if (await Invitation.exists({ _id: invitationId })) throw invitationInactive();
-    const error = new Error('Invitation not found.');
-    error.status = 404;
-    throw error;
+  const session = await mongoose.startSession();
+  try {
+    let invitation;
+    await session.withTransaction(async () => {
+      invitation = await Invitation.findOneAndUpdate(
+        { _id: invitationId, active: true, consumedAt: null, revokedAt: null },
+        { $set: { active: false, revokedAt: new Date() } },
+        { new: true, session },
+      );
+      if (!invitation) {
+        if (await Invitation.exists({ _id: invitationId }).session(session)) throw invitationInactive();
+        const error = new Error('Invitation not found.');
+        error.status = 404;
+        throw error;
+      }
+      await auditService.record({
+        actor: pastor._id || pastor.id,
+        actorRole: 'pastor',
+        action: 'invitation.revoke',
+        targetType: 'invitation',
+        targetId: invitation.id,
+        result: 'success',
+        metadata: safeMetadata(ip, userAgent),
+        session,
+      });
+    });
+    return invitation;
+  } finally {
+    await session.endSession();
   }
-  await auditService.record({
-    actor: pastor._id || pastor.id,
-    actorRole: 'pastor',
-    action: 'invitation.revoke',
-    targetType: 'invitation',
-    targetId: invitation.id,
-    result: 'success',
-    metadata: safeMetadata(ip, userAgent),
-  });
-  return invitation;
 }
 
 async function lookupActiveInvitation(plainToken) {

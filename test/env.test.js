@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { getConfig } = require('../src/config/env');
+const createApp = require('../app');
 
 const validProductionEnv = {
   NODE_ENV: 'production',
@@ -56,10 +57,26 @@ test('getConfig rejects invalid ports', () => {
   }
 });
 
+test('getConfig validates TRUST_PROXY_HOPS and defaults it to no trusted proxy', () => {
+  assert.equal(getConfig(validProductionEnv).trustProxyHops, 0);
+  assert.equal(getConfig({ ...validProductionEnv, TRUST_PROXY_HOPS: '1' }).trustProxyHops, 1);
+  for (const hops of ['-1', '1.5', 'true', '100']) {
+    assert.throws(() => getConfig({ ...validProductionEnv, TRUST_PROXY_HOPS: hops }), /TRUST_PROXY_HOPS/);
+  }
+});
+
+test('app defaults to direct connections and does not trust X-Forwarded-For', () => {
+  const directApp = createApp();
+  assert.equal(directApp.get('trust proxy'), false);
+  assert.equal(directApp.get('trust proxy fn')('203.0.113.10', 0), false);
+  assert.equal(createApp({ trustProxyHops: 1 }).get('trust proxy fn')('203.0.113.10', 0), true);
+});
+
 test('getConfig returns valid production config', () => {
   assert.deepEqual(getConfig({ ...validProductionEnv, PORT: '8443' }), {
     production: true,
     port: 8443,
     mongodbUri: 'mongodb://localhost/critical-matters-response',
+    trustProxyHops: 0,
   });
 });

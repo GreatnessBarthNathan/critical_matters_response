@@ -12,11 +12,14 @@ const createInvitationRoutes = require('./src/routes/invitationRoutes');
 const { csrfProtection } = require('./src/middleware/csrfMiddleware');
 const { notFound, errorHandler } = require('./src/middleware/errorMiddleware');
 
-function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits } = {}) {
+function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits, trustProxyHops = 0 } = {}) {
   const app = express();
   const isProduction = process.env.NODE_ENV === 'production';
 
-  app.set('trust proxy', 1);
+  if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0 || trustProxyHops > 10) {
+    throw new Error('trustProxyHops must be an integer between 0 and 10');
+  }
+  app.set('trust proxy', trustProxyHops || false);
   app.use(helmet({ contentSecurityPolicy: isProduction ? undefined : false }));
   app.use(cors({
     origin: isProduction ? false : (process.env.CLIENT_URL || 'http://localhost:5173'),

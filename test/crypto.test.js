@@ -19,6 +19,8 @@ test('AES-GCM encryption round-trips secrets with fresh IVs and rejects tamperin
   assert.notEqual(first, second);
   assert.equal(decryptSecret(first), 'totp-secret');
   const parts = first.split('.');
-  parts[2] = `${parts[2].slice(0, -1)}${parts[2].endsWith('A') ? 'B' : 'A'}`;
+  const ciphertext = Buffer.from(parts[2], 'base64url');
+  ciphertext[0] ^= 1;
+  parts[2] = ciphertext.toString('base64url');
   assert.throws(() => decryptSecret(parts.join('.')), /Unable to decrypt secret/);
 });

@@ -43,6 +43,8 @@ critical-matters-response/
 
 Requirements: Node.js 20+ and a MongoDB connection string. Production requires MongoDB Atlas, a sharded cluster, or a replica set because invitation redemption uses multi-document transactions; a standalone MongoDB server is rejected at production startup.
 
+Set `TRUST_PROXY_HOPS=0` by default. When deploying behind a single trusted reverse proxy, set it to `1` so rate limits use the originating client IP; do not enable it for untrusted proxy paths.
+
 1. Install dependencies (the root post-install step also installs the frontend):
 
    ```bash

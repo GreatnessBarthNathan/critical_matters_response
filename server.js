@@ -9,7 +9,10 @@ async function start() {
   const config = getConfig();
   await connectDatabase();
   await seedPastor();
-  createApp().listen(config.port, () => console.log(`Critical Matters Response is running on port ${config.port}`));
+  createApp({ trustProxyHops: config.trustProxyHops }).listen(
+    config.port,
+    () => console.log(`Critical Matters Response is running on port ${config.port}`),
+  );
 }
 
 start().catch((error) => {

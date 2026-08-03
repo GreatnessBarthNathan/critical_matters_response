@@ -148,20 +148,86 @@ test('parallel invitation creation leaves one active invitation and at most one 
   const app = await createTestApp(t);
   await createUser({ email: 'pastor@example.test', role: 'pastor' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
-  const attempts = await Promise.all([
-    csrf(request(app).post('/api/invitations'), pastorCookies).send({ email: 'parallel@example.test' }),
-    csrf(request(app).post('/api/invitations'), pastorCookies).send({ email: 'parallel@example.test' }),
-  ]);
+  const completionOrder = [];
+  const attempts = await Promise.all([1, 2].map(async () => {
+    const response = await csrf(request(app).post('/api/invitations'), pastorCookies).send({ email: 'parallel@example.test' });
+    if (response.status === 201) completionOrder.push(response);
+    return response;
+  }));
   assert.ok(attempts.every((response) => [201, 409].includes(response.status)));
+  assert.ok(completionOrder.length >= 1);
 
   const activeInvitations = await Invitation.find({ email: 'parallel@example.test', active: true }).select('+active');
   assert.equal(activeInvitations.length, 1);
   const tokens = attempts.filter((response) => response.status === 201).map((response) => response.body.token);
+  await request(app).get(`/api/invitations/${completionOrder.at(-1).body.token}`).expect(200);
+  if (completionOrder.length > 1) {
+    await request(app).get(`/api/invitations/${completionOrder.at(0).body.token}`).expect(400);
+  }
+  const revokedInvitations = await Invitation.find({ email: 'parallel@example.test', revokedAt: { $ne: null } });
+  const revocationEvents = await AuditEvent.find({ action: 'invitation.revoke' }).lean();
+  const auditedTargets = new Set(revocationEvents.map((event) => event.targetId));
+  assert.ok(revokedInvitations.every((invitation) => auditedTargets.has(String(invitation._id))));
   const redemptions = await Promise.all(tokens.map((token) => request(app)
     .post(`/api/invitations/${token}/redeem`)
     .send({ firstName: 'Parallel', lastName: 'Invitee', password: PASSWORD })));
   assert.equal(redemptions.filter((response) => response.status === 201).length, 1);
   assert.ok(redemptions.every((response) => [201, 400].includes(response.status)));
+});
+
+test('failed transactional invitation creation or replacement audit leaves no changed invitation state', async (t) => {
+  const app = await createTestApp(t);
+  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  const pastorCookies = await signedInCookies(app, 'pastor@example.test');
+  const originalRecord = auditService.record;
+  auditService.record = async (input) => {
+    if (input.action === 'invitation.create' && input.session) throw new Error('audit write failed');
+    return originalRecord(input);
+  };
+  try {
+    await csrf(request(app).post('/api/invitations'), pastorCookies).send({ email: 'create-audit-failure@example.test' }).expect(500);
+  } finally {
+    auditService.record = originalRecord;
+  }
+  assert.equal(await Invitation.countDocuments({ email: 'create-audit-failure@example.test' }), 0);
+
+  const existing = await createInvitation(app, pastorCookies, 'replacement-audit-failure@example.test');
+  auditService.record = async (input) => {
+    if (input.action === 'invitation.revoke' && input.session) throw new Error('audit write failed');
+    return originalRecord(input);
+  };
+  try {
+    await csrf(request(app).post('/api/invitations'), pastorCookies).send({ email: 'replacement-audit-failure@example.test' }).expect(500);
+  } finally {
+    auditService.record = originalRecord;
+  }
+  const invitations = await Invitation.find({ email: 'replacement-audit-failure@example.test' }).select('+active');
+  assert.equal(invitations.length, 1);
+  assert.equal(invitations[0].id, existing.invitation.id);
+  assert.equal(invitations[0].active, true);
+  assert.equal(invitations[0].revokedAt, null);
+  await request(app).get(`/api/invitations/${existing.token}`).expect(200);
+});
+
+test('failed transactional revocation audit leaves the invitation active', async (t) => {
+  const app = await createTestApp(t);
+  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  const pastorCookies = await signedInCookies(app, 'pastor@example.test');
+  const created = await createInvitation(app, pastorCookies, 'revoke-audit-failure@example.test');
+  const originalRecord = auditService.record;
+  auditService.record = async (input) => {
+    if (input.action === 'invitation.revoke' && input.session) throw new Error('audit write failed');
+    return originalRecord(input);
+  };
+  try {
+    await csrf(request(app).delete(`/api/invitations/${created.invitation.id}`), pastorCookies).expect(500);
+  } finally {
+    auditService.record = originalRecord;
+  }
+  const invitation = await Invitation.findById(created.invitation.id).select('+active');
+  assert.equal(invitation.active, true);
+  assert.equal(invitation.revokedAt, null);
+  await request(app).get(`/api/invitations/${created.token}`).expect(200);
 });
 
 test('concurrent revocation and redemption have exactly one winner', async (t) => {

@@ -19,6 +19,14 @@ function decodeTotpEncryptionKey(value) {
   }
 }
 
+function parseTrustProxyHops(value) {
+  if (value === undefined || value === '') return 0;
+  if (!/^(?:0|[1-9]\d?)$/.test(String(value)) || Number(value) > 10) {
+    throw new Error('TRUST_PROXY_HOPS must be an integer between 0 and 10');
+  }
+  return Number(value);
+}
+
 function getConfig(env = process.env) {
   const production = env.NODE_ENV === 'production';
   const required = ['MONGODB_URI', 'JWT_SECRET'];
@@ -36,7 +44,7 @@ function getConfig(env = process.env) {
     throw new Error('PORT must be an integer between 1 and 65535');
   }
 
-  return { production, port, mongodbUri: env.MONGODB_URI };
+  return { production, port, mongodbUri: env.MONGODB_URI, trustProxyHops: parseTrustProxyHops(env.TRUST_PROXY_HOPS) };
 }
 
-module.exports = { getConfig };
+module.exports = { getConfig, parseTrustProxyHops };
