@@ -21,6 +21,11 @@ const protect = asyncHandler(async (req, res, next) => {
     throw new Error('Your session has expired. Please sign in again.');
   }
 
+  if (payload.purpose || !payload.sub || !Number.isInteger(payload.sv)) {
+    res.status(401);
+    throw new Error('Your session is not valid for this request.');
+  }
+
   const user = await User.findById(payload.sub);
   if (!user || !user.isActive) {
     res.status(401);
@@ -43,4 +48,14 @@ function pastorOnly(req, res, next) {
   return next();
 }
 
-module.exports = { protect, pastorOnly };
+function requirePastorTotp(req, res, next) {
+  if (req.user?.role === 'pastor' && !req.user.totp?.enabled) {
+    const error = new Error('Pastor two-factor authentication setup is required.');
+    error.code = 'PASTOR_TOTP_REQUIRED';
+    error.status = 403;
+    return next(error);
+  }
+  return next();
+}
+
+module.exports = { protect, pastorOnly, requirePastorTotp };

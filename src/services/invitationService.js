@@ -6,6 +6,7 @@ const User = require('../models/User');
 const auditService = require('./auditService');
 const { hashToken } = require('../utils/crypto');
 const generateRecoveryKey = require('../utils/recoveryKey');
+const { generateRecoveryCodes } = require('./authService');
 
 const INVALID_INVITATION = 'INVALID_INVITATION';
 const DEFAULT_TTL_DAYS = 7;
@@ -55,10 +56,6 @@ function invitationTtlDays() {
 
 function generateInvitationToken() {
   return crypto.randomBytes(32).toString('base64url');
-}
-
-function generateRecoveryCodes() {
-  return Array.from({ length: 8 }, () => crypto.randomBytes(9).toString('base64url').toUpperCase());
 }
 
 function safeMetadata(ip, userAgent) {

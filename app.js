@@ -4,15 +4,14 @@ const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
-const authRoutes = require('./src/routes/authRoutes');
+const createAuthRoutes = require('./src/routes/authRoutes');
 const reportRoutes = require('./src/routes/reportRoutes');
 const userRoutes = require('./src/routes/userRoutes');
 const createInvitationRoutes = require('./src/routes/invitationRoutes');
 const { csrfProtection } = require('./src/middleware/csrfMiddleware');
 const { notFound, errorHandler } = require('./src/middleware/errorMiddleware');
 
-function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits, trustProxyHops = 0 } = {}) {
+function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits, authRateLimits, trustProxyHops = 0 } = {}) {
   const app = express();
   const isProduction = process.env.NODE_ENV === 'production';
 
@@ -30,14 +29,6 @@ function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits,
   app.use(cookieParser());
   app.use(morgan(isProduction ? 'combined' : 'dev'));
 
-  const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 100,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false,
-    message: { message: 'Too many attempts. Please wait a few minutes and try again.' },
-  });
-
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', service: 'Critical Matters Response' });
   });
@@ -46,7 +37,7 @@ function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits,
   // Invitation admin routes apply protect -> pastorOnly -> CSRF internally.
   app.use('/api/invitations', createInvitationRoutes(invitationRateLimits));
   app.use('/api', csrfProtection);
-  app.use('/api/auth', authLimiter, authRoutes);
+  app.use('/api/auth', createAuthRoutes(authRateLimits));
   app.use('/api/reports', reportRoutes);
   app.use('/api/users', userRoutes);
 

@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Report = require('../models/Report');
 const asyncHandler = require('../utils/asyncHandler');
+const authService = require('../services/authService');
 
 exports.updateProfile = asyncHandler(async (req, res) => {
   const allowed = ['firstName', 'lastName', 'phone', 'ministry', 'bio', 'avatarColor'];
@@ -35,4 +36,17 @@ exports.setUserStatus = asyncHandler(async (req, res) => {
   user.isActive = Boolean(req.body.isActive);
   await user.save();
   res.json({ user: user.toSafeObject(), message: `Account ${user.isActive ? 'activated' : 'deactivated'}.` });
+});
+
+exports.issueResetCode = asyncHandler(async (req, res) => {
+  const result = await authService.issueAssistedReset({
+    leaderId: req.params.id,
+    pastor: req.user,
+    metadata: { ip: req.ip, userAgent: req.get('user-agent') },
+  });
+  res.status(201).json({
+    resetCode: result.resetCode,
+    expiresAt: result.expiresAt,
+    message: 'Give this one-time reset code to the leader after personal verification. It will not be shown again.',
+  });
 });

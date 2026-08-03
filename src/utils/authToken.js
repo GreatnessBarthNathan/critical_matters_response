@@ -23,15 +23,52 @@ function signToken(user) {
   });
 }
 
-function setAuthCookie(res, token) {
-  const { maxAge } = sessionDuration();
-  res.cookie('cmr_token', token, {
+function signPurposeToken(payload, expiresIn = '5m') {
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+}
+
+function cookieOptions(maxAge) {
+  return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge,
+    ...(maxAge && { maxAge }),
     path: '/',
-  });
+  };
 }
 
-module.exports = { signToken, setAuthCookie };
+function setAuthCookie(res, token) {
+  const { maxAge } = sessionDuration();
+  res.cookie('cmr_token', token, cookieOptions(maxAge));
+}
+
+function setPendingTotpCookie(res, token) {
+  res.cookie('cmr_totp_pending', token, cookieOptions(5 * 60 * 1000));
+}
+
+function setTotpSetupCookie(res, token) {
+  res.cookie('cmr_totp_setup', token, cookieOptions(5 * 60 * 1000));
+}
+
+function clearAuthCookie(res) {
+  res.clearCookie('cmr_token', cookieOptions());
+}
+
+function clearPendingTotpCookie(res) {
+  res.clearCookie('cmr_totp_pending', cookieOptions());
+}
+
+function clearTotpSetupCookie(res) {
+  res.clearCookie('cmr_totp_setup', cookieOptions());
+}
+
+module.exports = {
+  signToken,
+  signPurposeToken,
+  setAuthCookie,
+  setPendingTotpCookie,
+  setTotpSetupCookie,
+  clearAuthCookie,
+  clearPendingTotpCookie,
+  clearTotpSetupCookie,
+};

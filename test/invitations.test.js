@@ -6,9 +6,12 @@ const User = require('../src/models/User');
 const Invitation = require('../src/models/Invitation');
 const AuditEvent = require('../src/models/AuditEvent');
 const auditService = require('../src/services/auditService');
+const { authenticator } = require('otplib');
+const { encryptSecret } = require('../src/utils/crypto');
 
 const PASSWORD = 'correct horse battery staple';
 const REPORT_CONTENT = 'private-report-content-must-never-be-audited';
+const PASTOR_TOTP_SECRET = authenticator.generateSecret();
 
 async function createUser({ email, role = 'user' }) {
   return User.create({
@@ -18,14 +21,25 @@ async function createUser({ email, role = 'user' }) {
     password: PASSWORD,
     recoveryKeyHash: 'LEGACY-RECOVERY-KEY',
     role,
+    ...(role === 'pastor' && { totp: { enabled: true, encryptedSecret: encryptSecret(PASTOR_TOTP_SECRET) } }),
   });
 }
 
 async function signedInCookies(app, email) {
   const login = await request(app).post('/api/auth/login').send({ email, password: PASSWORD }).expect(200);
-  const authCookie = login.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token='));
   const csrf = await request(app).get('/api/auth/csrf').expect(200);
   const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  let authCookie = login.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token='));
+  if (login.body.requiresTotp) {
+    const pendingCookie = login.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_pending='));
+    const verified = await request(app)
+      .post('/api/auth/totp/verify-login')
+      .set('Cookie', [pendingCookie, csrfCookie])
+      .set('X-CSRF-Token', csrf.body.csrfToken)
+      .send({ token: authenticator.generate(PASTOR_TOTP_SECRET) })
+      .expect(200);
+    authCookie = verified.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token='));
+  }
   return { authCookie, csrfCookie, csrfToken: csrf.body.csrfToken };
 }
 
