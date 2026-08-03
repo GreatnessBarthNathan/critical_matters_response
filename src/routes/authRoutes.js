@@ -1,8 +1,10 @@
 const express = require('express');
 const controller = require('../controllers/authController');
 const { protect } = require('../middleware/authMiddleware');
+const { csrfToken } = require('../middleware/csrfMiddleware');
 
 const router = express.Router();
+router.get('/csrf', csrfToken);
 router.post('/register', controller.register);
 router.post('/login', controller.login);
 router.post('/logout', controller.logout);

@@ -26,6 +26,10 @@ const protect = asyncHandler(async (req, res, next) => {
     res.status(401);
     throw new Error('This account is unavailable.');
   }
+  if (payload.sv !== user.sessionVersion) {
+    res.status(401);
+    throw new Error('Your session has been revoked. Please sign in again.');
+  }
 
   req.user = user;
   next();

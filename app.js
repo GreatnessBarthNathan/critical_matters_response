@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const authRoutes = require('./src/routes/authRoutes');
 const reportRoutes = require('./src/routes/reportRoutes');
 const userRoutes = require('./src/routes/userRoutes');
+const { csrfProtection } = require('./src/middleware/csrfMiddleware');
 const { notFound, errorHandler } = require('./src/middleware/errorMiddleware');
 
 function createApp({ frontendDist: configuredFrontendDist } = {}) {
@@ -36,6 +37,7 @@ function createApp({ frontendDist: configuredFrontendDist } = {}) {
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', service: 'Critical Matters Response' });
   });
+  app.use('/api', csrfProtection);
   app.use('/api/auth', authLimiter, authRoutes);
   app.use('/api/reports', reportRoutes);
   app.use('/api/users', userRoutes);

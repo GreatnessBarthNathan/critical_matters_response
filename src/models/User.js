@@ -7,6 +7,16 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
   password: { type: String, required: true, minlength: 8, select: false },
   recoveryKeyHash: { type: String, required: true, select: false },
+  sessionVersion: { type: Number, default: 0 },
+  recoveryCodeHashes: { type: [String], default: [], select: false },
+  totp: {
+    enabled: { type: Boolean, default: false },
+    encryptedSecret: { type: String, default: '', select: false },
+  },
+  assistedReset: {
+    tokenHash: { type: String, default: '', select: false },
+    expiresAt: Date,
+  },
   role: { type: String, enum: ['user', 'pastor'], default: 'user', index: true },
   phone: { type: String, trim: true, maxlength: 30, default: '' },
   ministry: { type: String, trim: true, maxlength: 100, default: '' },

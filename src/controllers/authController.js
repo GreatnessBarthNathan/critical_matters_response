@@ -34,7 +34,7 @@ exports.register = asyncHandler(async (req, res) => {
     recoveryKeyHash: recoveryKey,
   });
 
-  setAuthCookie(res, signToken(user.id));
+  setAuthCookie(res, signToken(user));
   res.status(201).json({
     user: user.toSafeObject(),
     recoveryKey,
@@ -54,7 +54,7 @@ exports.login = asyncHandler(async (req, res) => {
 
   user.lastLoginAt = new Date();
   await user.save();
-  setAuthCookie(res, signToken(user.id));
+  setAuthCookie(res, signToken(user));
   res.json({ user: user.toSafeObject(), message: 'Welcome back.' });
 });
 
