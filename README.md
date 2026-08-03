@@ -92,7 +92,7 @@ Invitation redemption and TOTP enrollment display eight one-time recovery codes 
 
 New codes are stored as a pepper-keyed HMAC lookup fingerprint plus an individual bcrypt hash, so only one candidate requires password-hash verification. `RECOVERY_CODE_PEPPER` is independent from `JWT_SECRET`; during a planned pepper rotation, put the old pepper in `RECOVERY_CODE_PREVIOUS_PEPPERS` until codes made under it have expired or been regenerated.
 
-The bounded (maximum eight) legacy string-hash recovery fallback is a temporary migration bridge for pre-fingerprint accounts. It should be removed after all legacy accounts have regenerated their recovery codes. No confirmation or password-recovery email is sent.
+The bounded (maximum eight) legacy string-hash fallback, plus a keyless fingerprint compatibility path for the immediately preceding release, are temporary migration bridges. They should be removed after all legacy accounts have regenerated their recovery codes. No confirmation or password-recovery email is sent.
 
 ## Production deployment (one application)
 

@@ -58,6 +58,12 @@ function recoveryFingerprint(value, pepper = recoveryPepperRing()[0].pepper) {
     .digest('base64url');
 }
 
+function legacyRecoveryFingerprint(value) {
+  return crypto.createHmac('sha256', process.env.JWT_SECRET)
+    .update(`cmr:recovery-code:v1\0${normalizeRecoveryCode(value)}`)
+    .digest('base64url');
+}
+
 function generateRecoveryCodes() {
   return Array.from({ length: 8 }, () => {
     const compact = crypto.randomBytes(16).toString('hex').toUpperCase();
@@ -262,8 +268,14 @@ async function confirmTotpSetup(user, token, setupToken, metadata) {
     await session.withTransaction(async () => {
       const filter = {
         _id: user.id || user._id, isActive: true, sessionVersion: setup.sv,
-        'totp.version': setup.totpVersion, 'totp.enabled': setup.totpEnabled,
+        'totp.enabled': setup.totpEnabled,
       };
+      if (setup.totpVersion === 0) {
+        // Raw documents created before totp.version existed hydrate as 0, but Mongo must match the absent field too.
+        filter.$or = [{ 'totp.version': 0 }, { 'totp.version': { $exists: false } }];
+      } else {
+        filter['totp.version'] = setup.totpVersion;
+      }
       if (setup.totpEnabled) Object.assign(filter, { 'totp.encryptedSecret': setup.expectedEncryptedSecret });
       updated = await User.findOneAndUpdate(
         filter,
@@ -337,13 +349,17 @@ async function recoverWithCode({ email, recoveryCode, newPassword, metadata } = 
   const normalizedCode = normalizeRecoveryCode(recoveryCode);
   const recoveryKeys = recoveryPepperRing();
   const candidates = recoveryKeys.map((key) => ({ keyId: key.keyId, fingerprint: recoveryFingerprint(normalizedCode, key.pepper) }));
+  const legacyFingerprint = legacyRecoveryFingerprint(normalizedCode);
   let user = await User.findOne({
     email: normalizeEmail(email), isActive: true,
-    $or: candidates.map((candidate) => ({ recoveryCodeHashes: { $elemMatch: candidate } })),
+    $or: [
+      ...candidates.map((candidate) => ({ recoveryCodeHashes: { $elemMatch: candidate } })),
+      { recoveryCodeHashes: { $elemMatch: { fingerprint: legacyFingerprint, keyId: { $exists: false }, bcryptHash: { $exists: true } } } },
+    ],
   }).select('+recoveryCodeHashes');
   let matchedEntry = user?.recoveryCodeHashes.find((entry) => candidates.some((candidate) => (
     entry?.keyId === candidate.keyId && entry?.fingerprint === candidate.fingerprint
-  )));
+  )) || (entry?.fingerprint === legacyFingerprint && !entry?.keyId && entry?.bcryptHash));
   let valid = matchedEntry ? await bcrypt.compare(normalizedCode, matchedEntry.bcryptHash) : false;
 
   // Existing pre-fingerprint records can still be used during migration, but the fallback is deliberately bounded.

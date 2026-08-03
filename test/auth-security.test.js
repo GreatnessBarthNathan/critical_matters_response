@@ -812,6 +812,29 @@ test('replacement TOTP confirmation is compare-and-set under concurrent confirma
   assert.equal((await User.findById(user.id)).totp.version, 1);
 });
 
+test('initial TOTP confirmation migrates raw documents without a stored totp version', async (t) => {
+  const app = await createTestApp(t);
+  const user = await createUser();
+  await User.collection.updateOne({ _id: user._id }, { $unset: { 'totp.version': 1 } });
+  const authCookie = await signIn(app);
+  const csrf = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const setup = await request(app)
+    .post('/api/auth/totp/setup')
+    .set('Cookie', [authCookie, csrfCookie])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .expect(200);
+  const secret = new URL(setup.body.otpauthUrl).searchParams.get('secret');
+  await request(app)
+    .post('/api/auth/totp/confirm')
+    .set('Cookie', [authCookie, csrfCookie, setup.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_setup='))])
+    .set('X-CSRF-Token', csrf.body.csrfToken)
+    .send({ token: authenticator.generate(secret) })
+    .expect(200);
+  const raw = await User.collection.findOne({ _id: user._id });
+  assert.equal(raw.totp.version, 1);
+});
+
 test('recovery peppers rotate independently from JWT and login failures use one bcrypt comparison', async (t) => {
   const app = await createTestApp(t);
   const oldPepper = process.env.RECOVERY_CODE_PEPPER;
