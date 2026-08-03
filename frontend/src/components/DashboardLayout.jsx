@@ -1,61 +1,93 @@
-import { useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, BookOpenText, ChevronDown, CircleHelp, FileLock2, FilePlus2, Files, LayoutDashboard, LogOut, Menu, Search, UserRound, UsersRound, X } from 'lucide-react';
+import { Archive, CircleHelp, LogOut, UsersRound } from 'lucide-react';
 import Brand from './Brand';
+import MobileNav, { tabsForRole } from './MobileNav';
 import { useAuth } from '../context/AuthContext';
 
-const userLinks = [
-  { to: '/app', end: true, label: 'Overview', icon: LayoutDashboard },
-  { to: '/app/reports/new', label: 'Create report', icon: FilePlus2 },
-  { to: '/app/reports', end: true, label: 'General reports', icon: Files },
-  { to: '/app/reports/private', label: 'Private reports', icon: FileLock2 },
-];
-const pastorLinks = [
-  { to: '/app', end: true, label: 'Pastor overview', icon: LayoutDashboard },
-  { to: '/app/reports', label: 'All reports', icon: Files },
-  { to: '/app/reports/private', label: 'Private matters', icon: FileLock2 },
-  { to: '/app/people', label: 'Church leaders', icon: UsersRound },
+// Desktop sidebar carries the same destinations as the phone tabs, plus secondary pages.
+const secondaryLinks = {
+  user: [
+    { to: '/app/reports/archived', label: 'Archive', icon: Archive },
+    { to: '/app/help', label: 'Help & privacy', icon: CircleHelp },
+  ],
+  pastor: [
+    { to: '/app/reports/archived', label: 'Archive', icon: Archive },
+    { to: '/app/people', label: 'Church leaders', icon: UsersRound },
+    { to: '/app/help', label: 'Help & privacy', icon: CircleHelp },
+  ],
+};
+
+const TITLES = [
+  ['/app/reports/new', 'Share a matter'],
+  ['/app/reports/archived', 'Archive'],
+  ['/app/reports/', 'Matter'],
+  ['/app/reports', 'Matters'],
+  ['/app/invitations', 'Invitations'],
+  ['/app/security', 'Security & audit'],
+  ['/app/profile', 'Profile'],
+  ['/app/people', 'Church leaders'],
+  ['/app/help', 'Help & privacy'],
 ];
 
-export default function DashboardLayout() {
-  const { user, logout } = useAuth(); const navigate = useNavigate(); const location = useLocation();
-  const [menuOpen, setMenuOpen] = useState(false); const [profileOpen, setProfileOpen] = useState(false);
-  const links = user.role === 'pastor' ? pastorLinks : userLinks;
-  const signOut = async () => { await logout(); navigate('/login'); };
-  const title = location.pathname.includes('/reports/new') ? 'Create a report' : location.pathname.includes('/reports/private') ? 'Private reports' : location.pathname.includes('/reports/') ? 'Report conversation' : location.pathname.includes('/reports') ? (user.role === 'pastor' ? 'All reports' : 'General reports') : location.pathname.includes('/profile') ? 'My profile' : location.pathname.includes('/people') ? 'Church leaders' : location.pathname.includes('/help') ? 'Help & privacy' : user.role === 'pastor' ? 'Pastoral care overview' : 'Your care space';
-
-  return (
-    <div className="dashboard-shell">
-      {menuOpen && <button className="mobile-backdrop" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
-      <aside className={`sidebar ${menuOpen ? 'sidebar--open' : ''}`}>
-        <div className="sidebar__brand"><Brand light /><button onClick={() => setMenuOpen(false)}><X /></button></div>
-        <div className="sidebar__role"><span className="avatar avatar--small" style={{ background: user.avatarColor }}>{user.firstName[0]}{user.lastName[0]}</span><div><strong>{user.firstName} {user.lastName}</strong><small>{user.role === 'pastor' ? 'Pastor administrator' : user.ministry || 'Church leader'}</small></div></div>
-        <nav className="sidebar__nav">
-          <small>Workspace</small>
-          {links.map(({ to, end, label, icon: Icon }) => <NavLink key={to} to={to} end={end} onClick={() => setMenuOpen(false)}><Icon size={19} /><span>{label}</span></NavLink>)}
-          <small>Account</small>
-          <NavLink to="/app/profile"><UserRound size={19} /><span>Profile & security</span></NavLink>
-          <NavLink to="/app/help"><CircleHelp size={19} /><span>Help & privacy</span></NavLink>
-        </nav>
-        <div className="sidebar__promise"><BookOpenText size={20} /><strong>A confidential promise</strong><p>Every matter shared here is visible only to you and your pastor.</p></div>
-        <button className="sidebar__logout" onClick={signOut}><LogOut size={18} /> Sign out</button>
-      </aside>
-      <section className="workspace">
-        <header className="topbar">
-          <button className="mobile-menu" onClick={() => setMenuOpen(true)}><Menu /></button>
-          <div><span className="topbar__crumb">Critical Matters Response</span><h1>{title}</h1></div>
-          <div className="topbar__actions">
-            <button className="icon-button search-button" aria-label="Search"><Search size={19} /></button>
-            <button className="icon-button" aria-label="Notifications"><Bell size={19} /><i /></button>
-            <div className="profile-menu"><button onClick={() => setProfileOpen(!profileOpen)}><span className="avatar avatar--tiny" style={{ background: user.avatarColor }}>{user.firstName[0]}{user.lastName[0]}</span><span>{user.firstName}</span><ChevronDown size={15} /></button>{profileOpen && <div className="profile-popover"><LinkItem to="/app/profile" onClick={() => setProfileOpen(false)}>View profile</LinkItem><button onClick={signOut}>Sign out</button></div>}</div>
-          </div>
-        </header>
-        <main className="workspace__content"><Outlet /></main>
-      </section>
-    </div>
-  );
+function pageTitle(pathname, role) {
+  const match = TITLES.find(([prefix]) => pathname.startsWith(prefix));
+  if (match) return match[1];
+  return role === 'pastor' ? 'Overview' : 'Home';
 }
 
-function LinkItem({ to, onClick, children }) {
-  return <NavLink to={to} onClick={onClick}>{children}</NavLink>;
+export default function DashboardLayout() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const primary = tabsForRole(user.role);
+  const secondary = secondaryLinks[user.role === 'pastor' ? 'pastor' : 'user'];
+
+  const signOut = async () => {
+    await logout();
+    navigate('/login', { replace: true });
+  };
+
+  return (
+    <div className="app-shell">
+      {/* Desktop-only sidebar; phones use the bottom navigation instead. */}
+      <aside className="app-sidebar">
+        <div className="app-sidebar__brand"><Brand /></div>
+        <div className="app-sidebar__who">
+          <span className="avatar avatar--small" style={{ background: user.avatarColor }}>
+            {user.firstName[0]}{user.lastName[0]}
+          </span>
+          <span>
+            <strong>{user.firstName} {user.lastName}</strong>
+            <small>{user.role === 'pastor' ? 'Pastor' : user.ministry || 'Church leader'}</small>
+          </span>
+        </div>
+        <nav className="app-sidebar__nav" aria-label="Sections">
+          {primary.map(({ to, end, label, icon: Icon }) => (
+            <NavLink key={to} to={to} end={end}><Icon size={18} aria-hidden="true" /><span>{label}</span></NavLink>
+          ))}
+          <hr />
+          {secondary.map(({ to, label, icon: Icon }) => (
+            <NavLink key={to} to={to}><Icon size={18} aria-hidden="true" /><span>{label}</span></NavLink>
+          ))}
+        </nav>
+        <button type="button" className="app-sidebar__logout" onClick={signOut}>
+          <LogOut size={17} aria-hidden="true" /> Sign out
+        </button>
+      </aside>
+
+      <div className="app-main">
+        <header className="app-header">
+          <Brand compact />
+          <h1>{pageTitle(location.pathname, user.role)}</h1>
+          <button type="button" className="app-header__logout" onClick={signOut} aria-label="Sign out">
+            <LogOut size={18} aria-hidden="true" />
+          </button>
+        </header>
+        <main className="app-content" id="main-content">
+          <Outlet />
+        </main>
+        <MobileNav role={user.role} />
+      </div>
+    </div>
+  );
 }

@@ -60,6 +60,8 @@ userSchema.methods.toSafeObject = function toSafeObject() {
     bio: this.bio,
     avatarColor: this.avatarColor,
     isActive: this.isActive,
+    // Whether two-factor is on is not a secret; the client needs it to render its own state.
+    totpEnabled: Boolean(this.totp?.enabled),
     createdAt: this.createdAt,
     lastLoginAt: this.lastLoginAt,
   };

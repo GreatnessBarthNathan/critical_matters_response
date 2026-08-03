@@ -17,7 +17,7 @@ exports.updateProfile = asyncHandler(async (req, res) => {
 exports.listUsers = asyncHandler(async (_req, res) => {
   const users = await User.find({ role: 'user' }).sort({ createdAt: -1 });
   const counts = await Report.aggregate([
-    { $group: { _id: '$owner', reportCount: { $sum: 1 }, openCount: { $sum: { $cond: [{ $ne: ['$status', 'closed'] }, 1, 0] } } } },
+    { $group: { _id: '$owner', reportCount: { $sum: 1 }, openCount: { $sum: { $cond: [{ $ne: ['$status', 'archived'] }, 1, 0] } } } },
   ]);
   const countMap = new Map(counts.map((item) => [String(item._id), item]));
   res.json({
