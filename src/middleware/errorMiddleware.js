@@ -22,6 +22,11 @@ function errorHandler(error, _req, res, _next) {
     return res.status(error.status || 409).json({ code: error.code, message: error.message });
   }
 
+  // Services raise stable string codes alongside an explicit status; surface both verbatim.
+  if (typeof error.code === 'string' && /^[A-Z][A-Z0-9_]*$/.test(error.code) && error.status) {
+    return res.status(error.status).json({ code: error.code, message });
+  }
+
   if (error.name === 'ValidationError') {
     status = 400;
     message = Object.values(error.errors).map((item) => item.message).join(' ');
