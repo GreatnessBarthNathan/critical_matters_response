@@ -42,8 +42,10 @@ const protect = asyncHandler(async (req, res, next) => {
 
 function pastorOnly(req, res, next) {
   if (req.user?.role !== 'pastor') {
-    res.status(403);
-    return next(new Error('Pastor access is required.'));
+    const error = new Error('Pastor access is required.');
+    error.code = 'FORBIDDEN';
+    error.status = 403;
+    return next(error);
   }
   return next();
 }

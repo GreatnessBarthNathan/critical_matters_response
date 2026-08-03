@@ -74,7 +74,7 @@ test('missing or forged CSRF values are rejected with a stable error code', asyn
   const forgedToken = `${csrfResponse.body.csrfToken.slice(0, -1)}x`;
 
   const missingResponse = await request(app).post('/api/auth/logout').set('Cookie', authCookie).expect(403);
-  assert.equal(missingResponse.body.code, 'CSRF_INVALID');
+  assert.equal(missingResponse.body.error.code, 'CSRF_INVALID');
   await request(app)
     .post('/api/auth/logout')
     .set('Cookie', [authCookie, csrfCookie.replace(csrfResponse.body.csrfToken, forgedToken)])
@@ -84,7 +84,8 @@ test('missing or forged CSRF values are rejected with a stable error code', asyn
 
 test('legacy recovery-key password reset endpoint is retired', async (t) => {
   const app = await createTestApp(t);
-  await request(app).post('/api/auth/reset-password').send({}).expect(403);
+  // The route is absent, so it answers 404 with or without CSRF values.
+  await request(app).post('/api/auth/reset-password').send({}).expect(404);
 
   const csrfResponse = await request(app).get('/api/auth/csrf').expect(200);
   const csrfCookie = csrfResponse.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
@@ -166,7 +167,7 @@ test('TOTP verification rejects wrong-purpose and expired pending tokens before 
     .set('X-CSRF-Token', csrf.body.csrfToken)
     .send({ token: '000000' })
     .expect(429);
-  assert.equal(limited.body.code, 'RATE_LIMITED');
+  assert.equal(limited.body.error.code, 'RATE_LIMITED');
 });
 
 test('recovery codes are one-time and revoke existing sessions when used', async (t) => {
@@ -249,7 +250,7 @@ test('an unconfigured pastor is limited to setup until TOTP confirmation', async
   const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
   await request(app).get('/api/auth/me').set('Cookie', authCookie).expect(200);
   const blocked = await request(app).get('/api/reports').set('Cookie', authCookie).expect(403);
-  assert.equal(blocked.body.code, 'PASTOR_TOTP_REQUIRED');
+  assert.equal(blocked.body.error.code, 'PASTOR_TOTP_REQUIRED');
   await request(app).get('/api/invitations').set('Cookie', authCookie).expect(403);
   await request(app).get('/api/users').set('Cookie', authCookie).expect(403);
 
@@ -319,7 +320,7 @@ test('pastor-assisted reset is single use, neutral on failure, and revokes the l
     .set('X-CSRF-Token', csrf.body.csrfToken)
     .send({ email: 'leader@example.test', resetCode: issued.body.resetCode, newPassword: 'a newer secure password' })
     .expect(400);
-  assert.equal(reused.body.code, 'INVALID_RECOVERY');
+  assert.equal(reused.body.error.code, 'INVALID_RECOVERY');
 });
 
 test('one recovery code has exactly one winner under concurrent reset attempts', async (t) => {
@@ -363,7 +364,7 @@ test('regeneration replaces every recovery code and password change rotates the 
     .set('X-CSRF-Token', csrf.body.csrfToken)
     .send({ email: 'ada@example.test', recoveryCode: 'OLD-RECOVERY-CODE', newPassword: 'a newer secure password' })
     .expect(400);
-  assert.equal(oldCode.body.code, 'INVALID_RECOVERY');
+  assert.equal(oldCode.body.error.code, 'INVALID_RECOVERY');
   const changed = await request(app)
     .patch('/api/auth/change-password')
     .set('Cookie', [oldCookie, csrfCookie])
@@ -465,7 +466,7 @@ test('expired assisted reset is neutral and deactivation permanently revokes old
     .set('X-CSRF-Token', csrf.body.csrfToken)
     .send({ email: 'ada@example.test', resetCode, newPassword: 'a newer secure password' })
     .expect(400);
-  assert.equal(expired.body.code, 'INVALID_RECOVERY');
+  assert.equal(expired.body.error.code, 'INVALID_RECOVERY');
 
   const secret = authenticator.generateSecret();
   const pastor = await User.create({

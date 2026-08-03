@@ -8,8 +8,9 @@ const createAuthRoutes = require('./src/routes/authRoutes');
 const reportRoutes = require('./src/routes/reportRoutes');
 const userRoutes = require('./src/routes/userRoutes');
 const createInvitationRoutes = require('./src/routes/invitationRoutes');
+const auditRoutes = require('./src/routes/auditRoutes');
 const { csrfProtection } = require('./src/middleware/csrfMiddleware');
-const { notFound, errorHandler } = require('./src/middleware/errorMiddleware');
+const { notFound, errorHandler, requestId } = require('./src/middleware/errorMiddleware');
 
 function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits, authRateLimits, trustProxyHops = 0 } = {}) {
   const app = express();
@@ -27,6 +28,7 @@ function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits,
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false }));
   app.use(cookieParser());
+  app.use(requestId);
   app.use(morgan(isProduction ? 'combined' : 'dev'));
 
   app.get('/api/health', (_req, res) => {
@@ -40,6 +42,7 @@ function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits,
   app.use('/api/auth', createAuthRoutes(authRateLimits));
   app.use('/api/reports', reportRoutes);
   app.use('/api/users', userRoutes);
+  app.use('/api/audit', auditRoutes);
 
   if (isProduction) {
     const frontendDist = configuredFrontendDist || path.join(__dirname, 'frontend', 'dist');

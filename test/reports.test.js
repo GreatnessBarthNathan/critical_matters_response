@@ -107,7 +107,7 @@ test('report lifecycle follows the approved status transitions', async (t) => {
   const illegal = await csrf(request(app).patch(`/api/reports/${created._id}/status`), pastorCookies)
     .send({ status: 'awaiting_leader' })
     .expect(409);
-  assert.equal(illegal.body.code, 'INVALID_REPORT_TRANSITION');
+  assert.equal(illegal.body.error.code, 'INVALID_REPORT_TRANSITION');
 });
 
 test('leaders are isolated to their own reports while the pastor can access every report', async (t) => {
@@ -121,7 +121,7 @@ test('leaders are isolated to their own reports while the pastor can access ever
 
   const created = await createReport(app, firstCookies);
   const hidden = await authed(request(app).get(`/api/reports/${created._id}`), secondCookies).expect(404);
-  assert.equal(hidden.body.code, 'REPORT_NOT_FOUND');
+  assert.equal(hidden.body.error.code, 'REPORT_NOT_FOUND');
   await csrf(request(app).patch(`/api/reports/${created._id}`), secondCookies)
     .send({ title: 'Unauthorized rewrite' })
     .expect(404);
@@ -252,7 +252,7 @@ test('archived reports are read-only for both participants until a pastor reopen
   const archivedResponse = await csrf(request(app).post(`/api/reports/${created._id}/responses`), pastorCookies)
     .send({ message: 'Attempting to reply after archiving.' })
     .expect(409);
-  assert.equal(archivedResponse.body.code, 'REPORT_ARCHIVED');
+  assert.equal(archivedResponse.body.error.code, 'REPORT_ARCHIVED');
 
   await authed(request(app).get(`/api/reports/${created._id}`), leaderCookies).expect(200);
 
@@ -385,13 +385,13 @@ test('report inputs reject operator-shaped filters, invalid enums, and oversized
   const invalidCreate = await csrf(request(app).post('/api/reports'), leaderCookies)
     .send({ title: 'Unsafe input', content: 'Must not accept an operator.', urgency: { $ne: 'normal' } })
     .expect(400);
-  assert.equal(invalidCreate.body.code, 'VALIDATION_FAILED');
+  assert.equal(invalidCreate.body.error.code, 'VALIDATION_FAILED');
 
   const invalidOwner = await authed(request(app).get('/api/reports?owner=not-an-object-id'), pastorCookies).expect(400);
-  assert.equal(invalidOwner.body.code, 'VALIDATION_FAILED');
+  assert.equal(invalidOwner.body.error.code, 'VALIDATION_FAILED');
   const oversizedSearch = await authed(
     request(app).get(`/api/reports?search=${encodeURIComponent('x'.repeat(201))}`),
     pastorCookies,
   ).expect(400);
-  assert.equal(oversizedSearch.body.code, 'VALIDATION_FAILED');
+  assert.equal(oversizedSearch.body.error.code, 'VALIDATION_FAILED');
 });

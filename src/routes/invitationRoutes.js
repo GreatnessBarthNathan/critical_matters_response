@@ -3,6 +3,7 @@ const rateLimit = require('express-rate-limit');
 const controller = require('../controllers/invitationController');
 const { protect, pastorOnly, requirePastorTotp } = require('../middleware/authMiddleware');
 const { csrfProtection } = require('../middleware/csrfMiddleware');
+const { sendError } = require('../middleware/errorMiddleware');
 
 function publicLimiter(limit, message) {
   return rateLimit({
@@ -10,7 +11,7 @@ function publicLimiter(limit, message) {
     limit,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
-    message: { code: 'RATE_LIMITED', message },
+    handler: (req, res) => sendError(req, res, 429, { code: 'RATE_LIMITED', message }),
   });
 }
 

@@ -22,5 +22,8 @@ test('production serves SPA routes while unknown API routes return JSON 404 resp
   const apiResponse = await request(app).get('/api/not-a-route').expect(404);
 
   assert.equal(spaResponse.text, '<!doctype html><title>Critical Matters Response</title>');
-  assert.deepEqual(apiResponse.body, { message: 'Route not found: GET /api/not-a-route' });
+  assert.deepEqual(Object.keys(apiResponse.body), ['error']);
+  assert.equal(apiResponse.body.error.code, 'NOT_FOUND');
+  assert.equal(apiResponse.body.error.message, 'Route not found: GET /api/not-a-route');
+  assert.equal(apiResponse.body.error.stack, undefined);
 });

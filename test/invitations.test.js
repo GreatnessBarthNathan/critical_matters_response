@@ -125,20 +125,26 @@ test('invalid invitation states and body email mismatch return the same neutral 
 
   for (const token of [expired.token, revoked.token, 'not-a-real-invitation-token']) {
     const response = await request(app).get(`/api/invitations/${token}`).expect(400);
-    assert.deepEqual(response.body, { code: 'INVALID_INVITATION', message: 'INVALID_INVITATION' });
+    assert.deepEqual(Object.keys(response.body), ['error']);
+    assert.equal(response.body.error.code, 'INVALID_INVITATION');
+    assert.equal(response.body.error.message, 'This invitation link is not valid.');
+    assert.deepEqual(response.body.error.fields, {});
   }
   for (const token of [expired.token, revoked.token]) {
     const response = await request(app)
       .post(`/api/invitations/${token}/redeem`)
       .send({ firstName: 'Invalid', lastName: 'Invitation', password: PASSWORD })
       .expect(400);
-    assert.deepEqual(response.body, { code: 'INVALID_INVITATION', message: 'INVALID_INVITATION' });
+    assert.deepEqual(Object.keys(response.body), ['error']);
+    assert.equal(response.body.error.code, 'INVALID_INVITATION');
+    assert.equal(response.body.error.message, 'This invitation link is not valid.');
+    assert.deepEqual(response.body.error.fields, {});
   }
   const mismatchResponse = await request(app)
     .post(`/api/invitations/${mismatch.token}/redeem`)
     .send({ firstName: 'Mismatch', lastName: 'Rejected', password: PASSWORD, email: 'someone-else@example.test' })
     .expect(400);
-  assert.equal(mismatchResponse.body.code, 'INVALID_INVITATION');
+  assert.equal(mismatchResponse.body.error.code, 'INVALID_INVITATION');
   assert.equal(await User.exists({ email: 'matched@example.test' }), null);
 });
 
@@ -153,7 +159,7 @@ test('a pre-existing account cannot redeem an invitation for its email', async (
     .post(`/api/invitations/${created.token}/redeem`)
     .send({ firstName: 'Existing', lastName: 'Account', password: PASSWORD })
     .expect(400);
-  assert.equal(response.body.code, 'INVALID_INVITATION');
+  assert.equal(response.body.error.code, 'INVALID_INVITATION');
   const invitation = await Invitation.findById(created.invitation.id);
   assert.equal(invitation.consumedAt, null);
 });
@@ -309,8 +315,8 @@ test('public inspection and redemption endpoints are independently rate limited 
     .post('/api/invitations/unknown-redemption-limited/redeem')
     .send({ firstName: 'Rate', lastName: 'Limited', password: PASSWORD })
     .expect(429);
-  assert.equal(inspectionLimit.body.code, 'RATE_LIMITED');
-  assert.equal(redemptionLimit.body.code, 'RATE_LIMITED');
+  assert.equal(inspectionLimit.body.error.code, 'RATE_LIMITED');
+  assert.equal(redemptionLimit.body.error.code, 'RATE_LIMITED');
   assert.ok(inspectionLimit.headers.ratelimit);
   assert.ok(redemptionLimit.headers.ratelimit);
 });
