@@ -49,6 +49,7 @@ export default function DashboardLayout() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       {/* Desktop-only sidebar; phones use the bottom navigation instead. */}
       <aside className="app-sidebar">
         <div className="app-sidebar__brand"><Brand /></div>
@@ -83,7 +84,7 @@ export default function DashboardLayout() {
             <LogOut size={18} aria-hidden="true" />
           </button>
         </header>
-        <main className="app-content" id="main-content">
+        <main className="app-content" id="main-content" tabIndex={-1}>
           <Outlet />
         </main>
         <MobileNav role={user.role} />

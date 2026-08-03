@@ -464,3 +464,31 @@ svg { flex: 0 0 auto; }
   .form-page, .form-card, .profile-summary { max-width: 720px; }
   .toast { bottom: var(--space-6); }
 }
+
+/* ============================================================
+   Accessibility
+   ============================================================ */
+:focus-visible { outline: 3px solid var(--tgn-sky); outline-offset: 3px; }
+/* Only remove the default ring where :focus-visible provides its own. */
+:focus:not(:focus-visible) { outline: none; }
+
+.skip-link {
+  position: absolute; z-index: 200; left: var(--space-4); top: -100px;
+  padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm);
+  background: var(--tgn-navy); color: #fff; font-size: var(--text-sm); font-weight: 600;
+  transition: top .15s ease;
+}
+.skip-link:focus { top: var(--space-4); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .status-badge, .priority-tag, .chip, .button { border: 1px solid currentColor; }
+}
