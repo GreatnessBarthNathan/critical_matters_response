@@ -3,10 +3,23 @@ let csrfRequest;
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+function errorDetails(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+  if (data.error && typeof data.error === 'object' && !Array.isArray(data.error)) {
+    return { code: data.code || data.error.code, message: data.message || data.error.message };
+  }
+  return { code: data.code, message: data.message };
+}
+
+export function isCsrfInvalidError(data) {
+  return errorDetails(data).code === 'CSRF_INVALID';
+}
+
 function toError(response, data) {
-  const error = new Error(data.message || 'Something went wrong. Please try again.');
+  const { code, message } = errorDetails(data);
+  const error = new Error(message || 'Something went wrong. Please try again.');
   error.status = response.status;
-  error.code = data.code;
+  error.code = code;
   return error;
 }
 
@@ -53,7 +66,7 @@ export async function api(path, options = {}) {
   let token = requiresCsrf ? await getCsrfToken() : undefined;
   let { response, data } = await send(path, options, token);
 
-  if (!response.ok && requiresCsrf && (response.status === 403 || data.code === 'CSRF_INVALID')) {
+  if (!response.ok && requiresCsrf && isCsrfInvalidError(data)) {
     token = await getCsrfToken({ force: true });
     ({ response, data } = await send(path, options, token));
   }

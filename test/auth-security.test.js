@@ -58,6 +58,37 @@ test('matching signed CSRF cookie and header pass validation', async (t) => {
     .expect(200);
 });
 
+test('missing or forged CSRF values are rejected with a stable error code', async (t) => {
+  const app = await createTestApp(t);
+  await createUser();
+  const authCookie = await signIn(app);
+  const csrfResponse = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrfResponse.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  const forgedToken = `${csrfResponse.body.csrfToken.slice(0, -1)}x`;
+
+  const missingResponse = await request(app).post('/api/auth/logout').set('Cookie', authCookie).expect(403);
+  assert.equal(missingResponse.body.code, 'CSRF_INVALID');
+  await request(app)
+    .post('/api/auth/logout')
+    .set('Cookie', [authCookie, csrfCookie.replace(csrfResponse.body.csrfToken, forgedToken)])
+    .set('X-CSRF-Token', forgedToken)
+    .expect(403);
+});
+
+test('password reset requires CSRF and accepts a valid issued token before validation', async (t) => {
+  const app = await createTestApp(t);
+  await request(app).post('/api/auth/reset-password').send({}).expect(403);
+
+  const csrfResponse = await request(app).get('/api/auth/csrf').expect(200);
+  const csrfCookie = csrfResponse.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
+  await request(app)
+    .post('/api/auth/reset-password')
+    .set('Cookie', csrfCookie)
+    .set('X-CSRF-Token', csrfResponse.body.csrfToken)
+    .send({})
+    .expect(400);
+});
+
 test('revoked session version is rejected', async (t) => {
   const app = await createTestApp(t);
   const user = await createUser();

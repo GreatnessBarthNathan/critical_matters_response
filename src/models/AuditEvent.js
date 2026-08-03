@@ -5,7 +5,14 @@ const metadataSchema = new mongoose.Schema({
   userAgent: { type: String, maxlength: 500 },
   requestId: { type: String, maxlength: 100 },
   reason: { type: String, maxlength: 500 },
-  changedFields: { type: [String], default: undefined },
+  changedFields: {
+    type: [{ type: String, maxlength: 100 }],
+    default: undefined,
+    validate: {
+      validator: (fields) => !fields || fields.length <= 50,
+      message: 'Audit metadata changedFields may contain at most 50 values.',
+    },
+  },
 }, { _id: false, strict: 'throw' });
 
 const auditEventSchema = new mongoose.Schema({
@@ -33,4 +40,11 @@ auditEventSchema.pre(
 );
 auditEventSchema.pre('deleteOne', { document: true, query: false }, rejectMutation);
 
-module.exports = mongoose.model('AuditEvent', auditEventSchema);
+const AuditEvent = mongoose.model('AuditEvent', auditEventSchema);
+
+// Database permissions must also prevent update/delete access in production; this model fails closed first.
+AuditEvent.bulkWrite = function rejectBulkWrite() {
+  return Promise.reject(new Error('AuditEvent records are append-only and cannot be changed or deleted.'));
+};
+
+module.exports = AuditEvent;

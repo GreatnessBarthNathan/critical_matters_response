@@ -19,6 +19,7 @@ function safeMetadata(input) {
       if (Array.isArray(value)) {
         const changedFields = value
           .filter((field) => typeof field === 'string' && !SENSITIVE_FIELD.test(field))
+          .slice(0, 50)
           .map((field) => field.slice(0, 100));
         if (changedFields.length) metadata.changedFields = changedFields;
       }

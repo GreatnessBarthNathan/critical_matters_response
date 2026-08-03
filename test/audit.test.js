@@ -53,3 +53,37 @@ test('AuditEvent documents cannot be changed or deleted after creation', async (
   await assert.rejects(AuditEvent.updateOne({ _id: event.id }, { action: 'auth.logout' }), /append-only/i);
   await assert.rejects(AuditEvent.deleteOne({ _id: event.id }), /append-only/i);
 });
+
+test('AuditEvent bulk writes fail closed and changed fields are capped', async (t) => {
+  await createTestApp(t);
+  const changedFields = Array.from({ length: 55 }, (_value, index) => `field-${index}`);
+  const event = await auditService.record({
+    action: 'report.update',
+    targetType: 'report',
+    targetId: 'report-456',
+    result: 'success',
+    metadata: { changedFields },
+  });
+
+  assert.equal(event.metadata.changedFields.length, 50);
+  await assert.rejects(
+    AuditEvent.bulkWrite([
+      { updateOne: { filter: { _id: event.id }, update: { action: 'report.delete' } } },
+      { deleteOne: { filter: { _id: event.id } } },
+    ]),
+    /append-only/i,
+  );
+  const unchangedEvent = await AuditEvent.findById(event.id).lean();
+  assert.equal(unchangedEvent.action, 'report.update');
+
+  await assert.rejects(
+    AuditEvent.create({
+      action: 'report.update',
+      targetType: 'report',
+      targetId: 'report-789',
+      result: 'success',
+      metadata: { changedFields: Array.from({ length: 51 }, (_value, index) => `field-${index}`) },
+    }),
+    /at most 50/i,
+  );
+});

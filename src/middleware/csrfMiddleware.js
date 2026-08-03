@@ -17,7 +17,6 @@ function isExempt(req) {
   if (req.method === 'GET' && /^\/invitations\/[^/]+$/.test(req.path)) return true;
   if (req.method !== 'POST') return false;
   return req.path === '/auth/login'
-    || req.path === '/auth/reset-password'
     || /^\/invitations\/[^/]+\/redeem$/.test(req.path);
 }
 
