@@ -14,6 +14,7 @@ function signValue(randomValue) {
 }
 
 function isExempt(req) {
+  if (req.method === 'GET' && /^\/invitations\/[^/]+$/.test(req.path)) return true;
   if (req.method !== 'POST') return false;
   return req.path === '/auth/login'
     || req.path === '/auth/reset-password'
@@ -32,18 +33,22 @@ function csrfToken(req, res) {
   res.json({ csrfToken: token });
 }
 
+function rejectInvalidCsrf(res) {
+  return res.status(403).json({ code: 'CSRF_INVALID', message: 'A valid CSRF token is required.' });
+}
+
 function csrfProtection(req, res, next) {
-  if (!MUTATING_METHODS.has(req.method) || isExempt(req)) return next();
+  if (isExempt(req) || !MUTATING_METHODS.has(req.method)) return next();
 
   const cookieToken = req.cookies?.[CSRF_COOKIE];
   const headerToken = req.get('X-CSRF-Token');
   if (!safeEqual(cookieToken, headerToken)) {
-    return res.status(403).json({ message: 'A valid CSRF token is required.' });
+    return rejectInvalidCsrf(res);
   }
 
   const [randomValue, signature, ...extra] = cookieToken.split('.');
   if (!randomValue || !signature || extra.length || !safeEqual(signature, signValue(randomValue))) {
-    return res.status(403).json({ message: 'A valid CSRF token is required.' });
+    return rejectInvalidCsrf(res);
   }
   return next();
 }
