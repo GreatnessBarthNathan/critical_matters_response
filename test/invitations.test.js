@@ -7,6 +7,7 @@ const Invitation = require('../src/models/Invitation');
 const AuditEvent = require('../src/models/AuditEvent');
 
 const PASSWORD = 'correct horse battery staple';
+const REPORT_CONTENT = 'private-report-content-must-never-be-audited';
 
 async function createUser({ email, role = 'user' }) {
   return User.create({
@@ -67,7 +68,13 @@ test('inspection is neutral and redemption creates a session with one-time recov
 
   const redeem = await request(app)
     .post(`/api/invitations/${created.token}/redeem`)
-    .send({ firstName: 'New', lastName: 'Person', password: PASSWORD, email: 'new.person@example.test' })
+    .send({
+      firstName: 'New',
+      lastName: 'Person',
+      password: PASSWORD,
+      email: 'new.person@example.test',
+      reportContent: REPORT_CONTENT,
+    })
     .expect(201);
   assert.equal(redeem.body.user.email, 'new.person@example.test');
   assert.equal(redeem.body.user.role, 'user');
@@ -82,6 +89,13 @@ test('inspection is neutral and redemption creates a session with one-time recov
   assert.ok(user.recoveryKeyHash);
   await request(app).get('/api/auth/me').set('Cookie', redeem.headers['set-cookie']).expect(200);
   await request(app).post(`/api/invitations/${created.token}/redeem`).send({ firstName: 'New', lastName: 'Person', password: PASSWORD }).expect(400);
+
+  const redemptionEvents = await AuditEvent.find({ action: 'invitation.redeem' }).lean();
+  assert.deepEqual(redemptionEvents.map((event) => event.result).sort(), ['failure', 'success']);
+  const auditText = JSON.stringify(redemptionEvents);
+  for (const sensitiveValue of [created.token, 'new.person@example.test', PASSWORD, REPORT_CONTENT, ...redeem.body.recoveryCodes]) {
+    assert.doesNotMatch(auditText, new RegExp(sensitiveValue));
+  }
 });
 
 test('invalid invitation states and body email mismatch return the same neutral response', async (t) => {
@@ -96,6 +110,13 @@ test('invalid invitation states and body email mismatch return the same neutral 
 
   for (const token of [expired.token, revoked.token, 'not-a-real-invitation-token']) {
     const response = await request(app).get(`/api/invitations/${token}`).expect(400);
+    assert.deepEqual(response.body, { code: 'INVALID_INVITATION', message: 'INVALID_INVITATION' });
+  }
+  for (const token of [expired.token, revoked.token]) {
+    const response = await request(app)
+      .post(`/api/invitations/${token}/redeem`)
+      .send({ firstName: 'Invalid', lastName: 'Invitation', password: PASSWORD })
+      .expect(400);
     assert.deepEqual(response.body, { code: 'INVALID_INVITATION', message: 'INVALID_INVITATION' });
   }
   const mismatchResponse = await request(app)
