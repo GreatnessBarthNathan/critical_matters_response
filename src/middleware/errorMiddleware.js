@@ -1,0 +1,26 @@
+function notFound(req, res) {
+  res.status(404).json({ message: `Route not found: ${req.method} ${req.originalUrl}` });
+}
+
+function errorHandler(error, _req, res, _next) {
+  let status = res.statusCode >= 400 ? res.statusCode : 500;
+  let message = error.message || 'An unexpected error occurred.';
+
+  if (error.name === 'ValidationError') {
+    status = 400;
+    message = Object.values(error.errors).map((item) => item.message).join(' ');
+  }
+  if (error.code === 11000) {
+    status = 409;
+    message = error.keyPattern?.email ? 'An account with this email already exists.' : 'This record already exists.';
+  }
+  if (error.name === 'CastError') {
+    status = 404;
+    message = 'The requested record was not found.';
+  }
+
+  if (process.env.NODE_ENV !== 'test') console.error(error);
+  res.status(status).json({ message, ...(process.env.NODE_ENV === 'development' && { stack: error.stack }) });
+}
+
+module.exports = { notFound, errorHandler };
