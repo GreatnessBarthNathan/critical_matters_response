@@ -424,9 +424,10 @@ svg { flex: 0 0 auto; }
     position: sticky; top: 0; height: 100vh; padding: var(--space-5);
     background: var(--tgn-navy); color: #fff; overflow-y: auto;
   }
-  .app-sidebar__brand { filter: none; }
   .app-sidebar__brand .brand { color: #fff; }
   .app-sidebar__brand .brand__words small { color: rgba(255,255,255,.65); }
+  /* The TGN asset has dark lettering baked in, so it needs a light chip to stay legible on navy. */
+  .app-sidebar__brand .brand__logo { background: #fff; padding: 4px; }
   .app-sidebar__who { display: flex; align-items: center; gap: var(--space-3); padding-bottom: var(--space-4); border-bottom: 1px solid rgba(255,255,255,.12); }
   .app-sidebar__who > span:last-child { display: grid; min-width: 0; }
   .app-sidebar__who strong { font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

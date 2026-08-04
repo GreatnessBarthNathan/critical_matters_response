@@ -12,9 +12,14 @@ export default function DashboardPage() {
   const pastor = user.role === 'pastor';
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api('/reports/stats').then(setData).catch((apiError) => setError(apiError.message));
+    api('/reports/stats')
+      .then(setData)
+      .catch((apiError) => setError(apiError.message))
+      // Track loading separately, so a refused request stops the spinner instead of hanging.
+      .finally(() => setLoading(false));
   }, []);
 
   const stats = data?.stats;
@@ -56,8 +61,10 @@ export default function DashboardPage() {
           <Link to="/app/reports">View all <ArrowRight size={15} aria-hidden="true" /></Link>
         </header>
 
-        {!data ? (
+        {loading ? (
           <div className="panel-loading"><span className="spinner" /></div>
+        ) : !data ? (
+          <p className="empty-note">This list could not be loaded. The message above explains why.</p>
         ) : data.recent.length === 0 ? (
           <EmptyState pastor={pastor} />
         ) : (
