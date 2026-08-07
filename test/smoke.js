@@ -89,10 +89,9 @@ async function run() {
     const app = createApp();
     step('pastor account bootstrapped from the environment');
 
-    // 2. Pastor TOTP is mandatory before the workspace opens
+    // 2. Pastor TOTP is optional before the workspace opens
     let pastor = await signIn(app, PASTOR_EMAIL, PASTOR_PASSWORD);
-    const blocked = await asUser(request(app).get('/api/reports'), pastor).expect(403);
-    assert.equal(blocked.body.error.code, 'ADMIN_TOTP_REQUIRED');
+    await asUser(request(app).get('/api/reports'), pastor).expect(200);
 
     const setup = await withCsrf(request(app).post('/api/auth/totp/setup'), pastor)
       .send({ currentPassword: PASTOR_PASSWORD })
@@ -111,7 +110,7 @@ async function run() {
 
     pastor = await signIn(app, PASTOR_EMAIL, PASTOR_PASSWORD, pastorSecret);
     await asUser(request(app).get('/api/reports'), pastor).expect(200);
-    step('pastor workspace unlocked after two-factor verification');
+    step('pastor workspace remains available after optional two-factor verification');
 
     // 3. Invitation
     const invitation = await withCsrf(request(app).post('/api/invitations'), pastor)

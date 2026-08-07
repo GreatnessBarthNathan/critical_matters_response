@@ -89,9 +89,8 @@ Vite on 5173. In production, `npm start` serves the built frontend and the API f
 1. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD`, then start the server. The admin account is created or
    promoted on startup.
 2. Sign in at `/login` with those details.
-3. The workspace stays locked until two-factor authentication is configured — protected admin
-   routes answer `403 ADMIN_TOTP_REQUIRED` until then. Open **Security**, set up an authenticator,
-   and confirm the six-digit code.
+3. Two-factor authentication is optional. Open **Security** to set up an authenticator and confirm
+   the six-digit code whenever you are ready.
 4. Save the eight recovery codes shown once at the end of setup.
 5. Remove `ADMIN_PASSWORD` from the environment and change the password from **Profile**.
 

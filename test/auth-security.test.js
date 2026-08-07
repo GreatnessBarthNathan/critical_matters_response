@@ -235,7 +235,7 @@ test('TOTP setup is provisional until confirmation and issues recovery codes onl
   assert.equal(relogin.body.requiresTotp, true);
 });
 
-test('an unconfigured admin is limited to setup until TOTP confirmation', async (t) => {
+test('an unconfigured admin can use the workspace before optional TOTP enrolment', async (t) => {
   const app = await createTestApp(t);
   await User.create({
     firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'admin',
@@ -249,10 +249,9 @@ test('an unconfigured admin is limited to setup until TOTP confirmation', async 
   const csrf = await request(app).get('/api/auth/csrf').expect(200);
   const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
   await request(app).get('/api/auth/me').set('Cookie', authCookie).expect(200);
-  const blocked = await request(app).get('/api/reports').set('Cookie', authCookie).expect(403);
-  assert.equal(blocked.body.error.code, 'ADMIN_TOTP_REQUIRED');
-  await request(app).get('/api/invitations').set('Cookie', authCookie).expect(403);
-  await request(app).get('/api/users').set('Cookie', authCookie).expect(403);
+  await request(app).get('/api/reports').set('Cookie', authCookie).expect(200);
+  await request(app).get('/api/invitations').set('Cookie', authCookie).expect(200);
+  await request(app).get('/api/users').set('Cookie', authCookie).expect(200);
 
   const setup = await request(app)
     .post('/api/auth/totp/setup')

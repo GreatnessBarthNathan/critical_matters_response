@@ -50,14 +50,4 @@ function adminOnly(req, res, next) {
   return next();
 }
 
-function requireAdminTotp(req, res, next) {
-  if (req.user?.role === 'admin' && !req.user.totp?.enabled) {
-    const error = new Error('Admin two-factor authentication setup is required.');
-    error.code = 'ADMIN_TOTP_REQUIRED';
-    error.status = 403;
-    return next(error);
-  }
-  return next();
-}
-
-module.exports = { protect, adminOnly, requireAdminTotp };
+module.exports = { protect, adminOnly };

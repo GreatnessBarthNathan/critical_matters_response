@@ -1,9 +1,9 @@
 const express = require('express');
 const controller = require('../controllers/auditController');
-const { protect, adminOnly, requireAdminTotp } = require('../middleware/authMiddleware');
+const { protect, adminOnly } = require('../middleware/authMiddleware');
 
 const router = express.Router();
-router.use(protect, requireAdminTotp, adminOnly);
+router.use(protect, adminOnly);
 router.get('/', controller.list);
 
 module.exports = router;
