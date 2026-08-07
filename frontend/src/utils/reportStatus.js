@@ -14,16 +14,11 @@ export const urgencyLabels = {
 
 export const categoryLabels = {
   general: 'General',
-  family: 'Family',
-  health: 'Health',
-  financial: 'Financial',
-  ministry: 'Ministry',
-  relationship: 'Relationship',
-  other: 'Other',
+  sensitive: 'Sensitive',
 };
 
-/** Statuses a pastor may set directly. New is entered by creation, not by hand. */
-export const pastorTransitions = ['in_review', 'awaiting_pastor', 'awaiting_leader', 'archived'];
+/** Statuses an admin may set directly. New is entered by creation, not by hand. */
+export const adminTransitions = ['in_review', 'awaiting_pastor', 'awaiting_leader', 'archived'];
 
 export function statusLabel(status) {
   return reportStatus[status]?.label ?? status;
@@ -39,17 +34,17 @@ export function isArchived(report) {
 
 /** A single source of truth for which controls a page may render. */
 export function allowedActions(report, user) {
-  const pastor = user?.role === 'pastor';
-  const owner = !pastor && String(report?.owner?._id || report?.owner) === String(user?.id);
+  const admin = user?.role === 'admin';
+  const owner = !admin && String(report?.owner?._id || report?.owner) === String(user?.id);
   const archived = isArchived(report);
 
   return {
     canEdit: owner && !archived,
-    canRespond: (owner || pastor) && !archived,
-    canTransition: pastor,
-    canArchive: pastor && !archived,
-    canReopen: pastor && archived,
-    canViewRevisions: owner || pastor,
+    canRespond: (owner || admin) && !archived,
+    canTransition: admin,
+    canArchive: admin && !archived,
+    canReopen: admin && archived,
+    canViewRevisions: owner || admin,
   };
 }
 

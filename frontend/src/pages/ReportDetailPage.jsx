@@ -5,14 +5,14 @@ import { api } from '../api/client';
 import Drawer from '../components/Drawer';
 import StatusBadge from '../components/StatusBadge';
 import Toast from '../components/Toast';
-import { allowedActions, categoryLabels, pastorTransitions, statusLabel, urgencyLabels } from '../utils/reportStatus';
+import { allowedActions, adminTransitions, categoryLabels, statusLabel, urgencyLabels } from '../utils/reportStatus';
 import { useAuth } from '../context/AuthContext';
 
 export default function ReportDetailPage() {
   const { id } = useParams();
   const location = useLocation();
   const { user } = useAuth();
-  const pastor = user.role === 'pastor';
+  const pastor = user.role === 'admin';
 
   const [report, setReport] = useState(null);
   const [message, setMessage] = useState('');
@@ -134,7 +134,7 @@ export default function ReportDetailPage() {
             <span className="visually-hidden">Change status</span>
             <select value={report.status} onChange={(event) => transition(event.target.value)}>
               {report.status === 'new' && <option value="new">{statusLabel('new')}</option>}
-              {pastorTransitions.map((value) => (
+              {adminTransitions.map((value) => (
                 <option key={value} value={value}>{statusLabel(value)}</option>
               ))}
             </select>
@@ -196,7 +196,7 @@ export default function ReportDetailPage() {
               <header>
                 <strong>{mine ? 'You' : `${response.author?.firstName ?? ''} ${response.author?.lastName ?? ''}`}</strong>
                 <small>
-                  {response.authorRole === 'pastor' ? 'Pastor' : 'Church leader'} ·{' '}
+                  {response.authorRole === 'admin' ? 'Admin' : 'Church leader'} ·{' '}
                   {new Date(response.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
                 </small>
               </header>

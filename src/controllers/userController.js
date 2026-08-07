@@ -53,7 +53,7 @@ exports.setUserStatus = asyncHandler(async (req, res) => {
         return;
       }
       await auditService.record({
-        actor: req.user.id, actorRole: 'pastor', action: 'account.status_changed', targetType: 'user', targetId: user.id,
+        actor: req.user.id, actorRole: 'admin', action: 'account.status_changed', targetType: 'user', targetId: user.id,
         result: 'success', metadata: { ip: req.ip, userAgent: req.get('user-agent'), changedFields: ['isActive'] }, session,
       });
     });

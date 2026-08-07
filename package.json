@@ -12,6 +12,7 @@
     "build": "npm --prefix frontend run build",
     "start": "node server.js",
     "check": "npm --prefix frontend run lint && npm --prefix frontend run build",
+    "migrate:roles-and-categories": "node scripts/migrate-roles-and-categories.js",
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "smoke": "node test/smoke.js"
   },

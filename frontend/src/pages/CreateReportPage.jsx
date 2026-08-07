@@ -36,7 +36,7 @@ export default function CreateReportPage() {
     }
   }, [form]);
 
-  if (user.role === 'pastor') return <Navigate to="/app/reports" replace />;
+  if (user.role === 'admin') return <Navigate to="/app/reports" replace />;
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
   const needsAcknowledgement = form.urgency === 'urgent';
@@ -206,7 +206,7 @@ export default function CreateReportPage() {
           )}
         </div>
 
-        <p className="security-note"><ShieldCheck size={14} aria-hidden="true" /> Encrypted session · Pastor-only access</p>
+        <p className="security-note"><ShieldCheck size={14} aria-hidden="true" /> Encrypted session · Private user and admin access</p>
       </form>
     </div>
   );

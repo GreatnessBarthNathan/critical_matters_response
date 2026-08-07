@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext';
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const pastor = user.role === 'pastor';
+  const pastor = user.role === 'admin';
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);

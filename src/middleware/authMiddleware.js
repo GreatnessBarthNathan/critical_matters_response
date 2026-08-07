@@ -40,9 +40,9 @@ const protect = asyncHandler(async (req, res, next) => {
   next();
 });
 
-function pastorOnly(req, res, next) {
-  if (req.user?.role !== 'pastor') {
-    const error = new Error('Pastor access is required.');
+function adminOnly(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    const error = new Error('Admin access is required.');
     error.code = 'FORBIDDEN';
     error.status = 403;
     return next(error);
@@ -50,14 +50,14 @@ function pastorOnly(req, res, next) {
   return next();
 }
 
-function requirePastorTotp(req, res, next) {
-  if (req.user?.role === 'pastor' && !req.user.totp?.enabled) {
-    const error = new Error('Pastor two-factor authentication setup is required.');
-    error.code = 'PASTOR_TOTP_REQUIRED';
+function requireAdminTotp(req, res, next) {
+  if (req.user?.role === 'admin' && !req.user.totp?.enabled) {
+    const error = new Error('Admin two-factor authentication setup is required.');
+    error.code = 'ADMIN_TOTP_REQUIRED';
     error.status = 403;
     return next(error);
   }
   return next();
 }
 
-module.exports = { protect, pastorOnly, requirePastorTotp };
+module.exports = { protect, adminOnly, requireAdminTotp };

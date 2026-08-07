@@ -3,14 +3,14 @@ const mongoose = require('mongoose');
 const STATUSES = ['new', 'in_review', 'awaiting_pastor', 'awaiting_leader', 'archived'];
 const URGENCIES = ['normal', 'important', 'urgent'];
 const PRIORITY_WEIGHTS = { normal: 0, important: 1, urgent: 2 };
-const CATEGORIES = ['general', 'family', 'health', 'financial', 'ministry', 'relationship', 'other'];
+const CATEGORIES = ['general', 'sensitive'];
 const SENSITIVITIES = ['standard', 'private'];
 
 const APPEND_ONLY_REVISIONS = 'Report revisions are append-only and cannot be changed or deleted.';
 
 const responseSchema = new mongoose.Schema({
   author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  authorRole: { type: String, enum: ['user', 'pastor'], required: true },
+  authorRole: { type: String, enum: ['user', 'admin'], required: true },
   message: { type: String, required: true, trim: true, maxlength: 5000 },
   readByUser: { type: Boolean, default: false },
   readByPastor: { type: Boolean, default: false },

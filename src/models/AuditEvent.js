@@ -17,7 +17,7 @@ const metadataSchema = new mongoose.Schema({
 
 const auditEventSchema = new mongoose.Schema({
   actor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  actorRole: { type: String, enum: ['user', 'pastor'] },
+  actorRole: { type: String, enum: ['user', 'admin'] },
   action: { type: String, required: true, trim: true, maxlength: 100 },
   targetType: { type: String, required: true, trim: true, maxlength: 100 },
   targetId: { type: String, required: true, trim: true, maxlength: 100 },

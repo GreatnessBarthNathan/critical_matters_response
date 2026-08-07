@@ -10,7 +10,7 @@ const secondaryLinks = {
     { to: '/app/reports/archived', label: 'Archive', icon: Archive },
     { to: '/app/help', label: 'Help & privacy', icon: CircleHelp },
   ],
-  pastor: [
+  admin: [
     { to: '/app/reports/archived', label: 'Archive', icon: Archive },
     { to: '/app/people', label: 'Church leaders', icon: UsersRound },
     { to: '/app/help', label: 'Help & privacy', icon: CircleHelp },
@@ -32,7 +32,7 @@ const TITLES = [
 function pageTitle(pathname, role) {
   const match = TITLES.find(([prefix]) => pathname.startsWith(prefix));
   if (match) return match[1];
-  return role === 'pastor' ? 'Overview' : 'Home';
+  return role === 'admin' ? 'Overview' : 'Home';
 }
 
 export default function DashboardLayout() {
@@ -40,7 +40,7 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const primary = tabsForRole(user.role);
-  const secondary = secondaryLinks[user.role === 'pastor' ? 'pastor' : 'user'];
+  const secondary = secondaryLinks[user.role === 'admin' ? 'admin' : 'user'];
 
   const signOut = async () => {
     await logout();
@@ -59,7 +59,7 @@ export default function DashboardLayout() {
           </span>
           <span>
             <strong>{user.firstName} {user.lastName}</strong>
-            <small>{user.role === 'pastor' ? 'Pastor' : user.ministry || 'Church leader'}</small>
+            <small>{user.role === 'admin' ? 'Admin' : user.ministry || 'Church leader'}</small>
           </span>
         </div>
         <nav className="app-sidebar__nav" aria-label="Sections">

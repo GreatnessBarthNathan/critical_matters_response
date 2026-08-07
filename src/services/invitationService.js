@@ -103,7 +103,7 @@ async function createInvitation({ email, pastor, ip, userAgent }) {
           for (const replaced of replacedInvitations) {
             await auditService.record({
               actor: pastor._id || pastor.id,
-              actorRole: 'pastor',
+              actorRole: 'admin',
               action: 'invitation.revoke',
               targetType: 'invitation',
               targetId: replaced.id,
@@ -121,7 +121,7 @@ async function createInvitation({ email, pastor, ip, userAgent }) {
           }], { session });
           await auditService.record({
             actor: pastor._id || pastor.id,
-            actorRole: 'pastor',
+            actorRole: 'admin',
             action: 'invitation.create',
             targetType: 'invitation',
             targetId: invitation.id,
@@ -184,7 +184,7 @@ async function revokeInvitation({ invitationId, pastor, ip, userAgent }) {
       }
       await auditService.record({
         actor: pastor._id || pastor.id,
-        actorRole: 'pastor',
+        actorRole: 'admin',
         action: 'invitation.revoke',
         targetType: 'invitation',
         targetId: invitation.id,

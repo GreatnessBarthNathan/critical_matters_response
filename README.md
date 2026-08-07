@@ -62,7 +62,7 @@ node -e "console.log('TOTP_ENCRYPTION_KEY=' + require('crypto').randomBytes(32).
 | `INVITATION_TTL_DAYS` | Invitation lifetime. Default 7. |
 | `ASSISTED_RESET_TTL_MINUTES` | Pastor reset-code lifetime. Default 15. |
 | `TRUST_PROXY_HOPS` | Trusted reverse-proxy hops. Keep `0` unless you run behind one. |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Bootstraps or promotes the pastor account on startup. |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Bootstraps or promotes the admin account on startup. |
 
 Rotating a secret has consequences: changing `JWT_SECRET` signs everyone out, and changing
 `TOTP_ENCRYPTION_KEY` makes every stored authenticator secret unreadable — every user must re-enrol.
@@ -84,16 +84,27 @@ npm run build && npm start
 `npm install` also installs the frontend. `npm run dev` serves the API on `PORT` (default 5000) and
 Vite on 5173. In production, `npm start` serves the built frontend and the API from one process.
 
-## First run: pastor onboarding
+## First run: admin onboarding
 
-1. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD`, then start the server. The pastor account is created or
+1. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD`, then start the server. The admin account is created or
    promoted on startup.
 2. Sign in at `/login` with those details.
-3. The workspace stays locked until two-factor authentication is configured — protected pastor
-   routes answer `403 PASTOR_TOTP_REQUIRED` until then. Open **Security**, set up an authenticator,
+3. The workspace stays locked until two-factor authentication is configured — protected admin
+   routes answer `403 ADMIN_TOTP_REQUIRED` until then. Open **Security**, set up an authenticator,
    and confirm the six-digit code.
 4. Save the eight recovery codes shown once at the end of setup.
 5. Remove `ADMIN_PASSWORD` from the environment and change the password from **Profile**.
+
+## Upgrade existing data
+
+Before deploying this release against an existing database, run the idempotent migration once:
+
+```bash
+npm run migrate:roles-and-categories
+```
+
+It changes legacy `pastor` roles and response/audit actor roles to `admin`. Legacy report categories
+become `sensitive` when their sensitivity was `private`; all other legacy categories become `general`.
 
 ## Inviting leaders
 

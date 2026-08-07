@@ -7,7 +7,7 @@ const AuditEvent = require('../src/models/AuditEvent');
 const { authenticator } = require('otplib');
 const auditService = require('../src/services/auditService');
 const authService = require('../src/services/authService');
-const seedPastor = require('../src/utils/seedPastor');
+const seedAdmin = require('../src/utils/seedAdmin');
 const { encryptSecret, hashToken } = require('../src/utils/crypto');
 const { signToken } = require('../src/utils/authToken');
 
@@ -235,10 +235,10 @@ test('TOTP setup is provisional until confirmation and issues recovery codes onl
   assert.equal(relogin.body.requiresTotp, true);
 });
 
-test('an unconfigured pastor is limited to setup until TOTP confirmation', async (t) => {
+test('an unconfigured admin is limited to setup until TOTP confirmation', async (t) => {
   const app = await createTestApp(t);
   await User.create({
-    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'pastor',
+    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'admin',
     password: 'correct horse battery staple', recoveryKeyHash: 'PASTOR-LEGACY-KEY',
   });
   const authCookie = await request(app)
@@ -250,7 +250,7 @@ test('an unconfigured pastor is limited to setup until TOTP confirmation', async
   const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
   await request(app).get('/api/auth/me').set('Cookie', authCookie).expect(200);
   const blocked = await request(app).get('/api/reports').set('Cookie', authCookie).expect(403);
-  assert.equal(blocked.body.error.code, 'PASTOR_TOTP_REQUIRED');
+  assert.equal(blocked.body.error.code, 'ADMIN_TOTP_REQUIRED');
   await request(app).get('/api/invitations').set('Cookie', authCookie).expect(403);
   await request(app).get('/api/users').set('Cookie', authCookie).expect(403);
 
@@ -283,7 +283,7 @@ test('pastor-assisted reset is single use, neutral on failure, and revokes the l
   const secret = authenticator.generateSecret();
   const { encryptSecret } = require('../src/utils/crypto');
   await User.create({
-    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'pastor', password: 'correct horse battery staple', recoveryKeyHash: 'PASTOR-LEGACY-KEY',
+    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'admin', password: 'correct horse battery staple', recoveryKeyHash: 'PASTOR-LEGACY-KEY',
     totp: { enabled: true, encryptedSecret: encryptSecret(secret) },
   });
   const leaderCookie = await request(app).post('/api/auth/login').send({ email: 'leader@example.test', password: 'correct horse battery staple' })
@@ -470,7 +470,7 @@ test('expired assisted reset is neutral and deactivation permanently revokes old
 
   const secret = authenticator.generateSecret();
   const pastor = await User.create({
-    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'pastor', password: 'correct horse battery staple',
+    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'admin', password: 'correct horse battery staple',
     totp: { enabled: true, encryptedSecret: encryptSecret(secret) },
   });
   const leaderCookie = await signIn(app);
@@ -508,13 +508,13 @@ test('pastor bootstrap preserves an existing password and TOTP state while new p
   };
   const secret = authenticator.generateSecret();
   const existing = await User.create({
-    firstName: 'Existing', lastName: 'Pastor', email: 'bootstrap@example.test', role: 'pastor', password: 'original secure password',
+    firstName: 'Existing', lastName: 'Pastor', email: 'bootstrap@example.test', role: 'admin', password: 'original secure password',
     totp: { enabled: true, encryptedSecret: encryptSecret(secret) },
   });
   try {
     process.env.ADMIN_EMAIL = existing.email;
     process.env.ADMIN_PASSWORD = 'replacement secure password';
-    await seedPastor();
+    await seedAdmin();
     const preserved = await User.findById(existing.id).select('+password +totp.encryptedSecret');
     assert.equal(await preserved.comparePassword('original secure password'), true);
     assert.equal(preserved.totp.enabled, true);
@@ -522,7 +522,7 @@ test('pastor bootstrap preserves an existing password and TOTP state while new p
 
     process.env.ADMIN_EMAIL = 'new-bootstrap@example.test';
     process.env.ADMIN_PASSWORD = 'new pastor secure password';
-    await seedPastor();
+    await seedAdmin();
     const newPastor = await User.findOne({ email: process.env.ADMIN_EMAIL }).select('+recoveryCodeHashes');
     assert.equal(newPastor.totp.enabled, false);
     assert.deepEqual(newPastor.recoveryCodeHashes, []);
@@ -552,7 +552,7 @@ test('status changes are audited transactionally and audit failures roll back se
   const leader = await createUser();
   const secret = authenticator.generateSecret();
   const pastor = await User.create({
-    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'pastor', password: 'correct horse battery staple',
+    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'admin', password: 'correct horse battery staple',
     totp: { enabled: true, encryptedSecret: encryptSecret(secret) },
   });
   const pastorCookie = `cmr_token=${signToken(pastor)}`;
@@ -566,7 +566,7 @@ test('status changes are audited transactionally and audit failures roll back se
     .expect(200);
   const success = await AuditEvent.findOne({ action: 'account.status_changed', targetId: leader.id }).lean();
   assert.equal(String(success.actor), String(pastor.id));
-  assert.equal(success.actorRole, 'pastor');
+  assert.equal(success.actorRole, 'admin');
   assert.deepEqual(success.metadata.changedFields, ['isActive']);
 
   const before = await User.findById(leader.id);

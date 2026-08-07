@@ -62,7 +62,7 @@ function safeMetadata({ ip, userAgent, changedFields, reason } = {}) {
 }
 
 function isPastor(user) {
-  return user?.role === 'pastor';
+  return user?.role === 'admin';
 }
 
 // Leaders may only ever reach their own matters; pastors triage every matter.
@@ -256,7 +256,7 @@ async function getReport({ user, reportId, markRead = true, ip, userAgent }) {
       else found.readState.ownerReadAt = now;
       for (const response of found.responses) {
         if (isPastor(user) && response.authorRole === 'user' && !response.readByPastor) response.readByPastor = true;
-        if (!isPastor(user) && response.authorRole === 'pastor' && !response.readByUser) response.readByUser = true;
+        if (!isPastor(user) && response.authorRole === 'admin' && !response.readByUser) response.readByUser = true;
       }
       changed = true;
     }

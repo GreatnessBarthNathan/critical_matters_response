@@ -20,7 +20,7 @@ async function createUser({ email, role = 'user', firstName = 'Ada' }) {
     password: PASSWORD,
     recoveryKeyHash: 'LEGACY-RECOVERY-KEY',
     role,
-    ...(role === 'pastor' && { totp: { enabled: true, encryptedSecret: encryptSecret(PASTOR_TOTP_SECRET) } }),
+    ...(role === 'admin' && { totp: { enabled: true, encryptedSecret: encryptSecret(PASTOR_TOTP_SECRET) } }),
   });
 }
 
@@ -54,7 +54,7 @@ async function createReport(app, cookies, overrides = {}) {
   const response = await csrf(request(app).post('/api/reports'), cookies)
     .send({
       title: 'Family matter needing prayer',
-      category: 'family',
+      category: 'general',
       sensitivity: 'standard',
       urgency: 'normal',
       content: 'Details of the confidential matter that only the owner and pastor may read.',
@@ -66,7 +66,7 @@ async function createReport(app, cookies, overrides = {}) {
 
 test('report lifecycle follows the approved status transitions', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
   await createUser({ email: 'leader@example.test' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const leaderCookies = await signedInCookies(app, 'leader@example.test');
@@ -112,7 +112,7 @@ test('report lifecycle follows the approved status transitions', async (t) => {
 
 test('leaders are isolated to their own reports while the pastor can access every report', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
   await createUser({ email: 'first@example.test', firstName: 'First' });
   await createUser({ email: 'second@example.test', firstName: 'Second' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
@@ -141,7 +141,7 @@ test('leaders are isolated to their own reports while the pastor can access ever
 
 test('editing a report stores an immutable revision containing only changed fields', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
   const leader = await createUser({ email: 'leader@example.test' });
   const leaderCookies = await signedInCookies(app, 'leader@example.test');
 
@@ -206,7 +206,7 @@ test('editing a report stores an immutable revision containing only changed fiel
 
 test('responses retain sender/read state and are marked read by the other participant', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
   await createUser({ email: 'leader@example.test' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const leaderCookies = await signedInCookies(app, 'leader@example.test');
@@ -215,7 +215,7 @@ test('responses retain sender/read state and are marked read by the other partic
   const pastorResponse = await csrf(request(app).post(`/api/reports/${created._id}/responses`), pastorCookies)
     .send({ message: 'I have received this confidential matter.' })
     .expect(201);
-  assert.equal(pastorResponse.body.report.responses[0].authorRole, 'pastor');
+  assert.equal(pastorResponse.body.report.responses[0].authorRole, 'admin');
   assert.equal(pastorResponse.body.report.responses[0].readByPastor, true);
   assert.equal(pastorResponse.body.report.responses[0].readByUser, false);
   assert.equal(pastorResponse.body.report.readState.ownerReadAt, null);
@@ -239,7 +239,7 @@ test('responses retain sender/read state and are marked read by the other partic
 
 test('archived reports are read-only for both participants until a pastor reopens them', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
   await createUser({ email: 'leader@example.test' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const leaderCookies = await signedInCookies(app, 'leader@example.test');
@@ -266,7 +266,7 @@ test('archived reports are read-only for both participants until a pastor reopen
 
 test('pastor queues sort by priority weight before last activity', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
   await createUser({ email: 'leader@example.test' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const leaderCookies = await signedInCookies(app, 'leader@example.test');
@@ -292,7 +292,7 @@ test('pastor queues sort by priority weight before last activity', async (t) => 
 
 test('report statistics use the approved status names for each role', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
   await createUser({ email: 'leader@example.test' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const leaderCookies = await signedInCookies(app, 'leader@example.test');
@@ -323,7 +323,7 @@ test('report statistics use the approved status names for each role', async (t) 
 
 test('report mutations and their audit records commit or roll back together', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
   await createUser({ email: 'leader@example.test' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const leaderCookies = await signedInCookies(app, 'leader@example.test');
@@ -377,7 +377,7 @@ test('report mutations and their audit records commit or roll back together', as
 
 test('report inputs reject operator-shaped filters, invalid enums, and oversized searches', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
   await createUser({ email: 'leader@example.test' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const leaderCookies = await signedInCookies(app, 'leader@example.test');
@@ -386,6 +386,16 @@ test('report inputs reject operator-shaped filters, invalid enums, and oversized
     .send({ title: 'Unsafe input', content: 'Must not accept an operator.', urgency: { $ne: 'normal' } })
     .expect(400);
   assert.equal(invalidCreate.body.error.code, 'VALIDATION_FAILED');
+
+  const invalidCategory = await csrf(request(app).post('/api/reports'), leaderCookies)
+    .send({ title: 'Invalid category', content: 'Old categories must no longer be accepted.', category: 'family' })
+    .expect(400);
+  assert.equal(invalidCategory.body.error.code, 'VALIDATION_FAILED');
+
+  const sensitiveCategory = await csrf(request(app).post('/api/reports'), leaderCookies)
+    .send({ title: 'Sensitive category', content: 'The two approved categories remain valid.', category: 'sensitive' })
+    .expect(201);
+  assert.equal(sensitiveCategory.body.report.category, 'sensitive');
 
   const invalidOwner = await authed(request(app).get('/api/reports?owner=not-an-object-id'), pastorCookies).expect(400);
   assert.equal(invalidOwner.body.error.code, 'VALIDATION_FAILED');

@@ -12,7 +12,7 @@ const DEFAULT_FILTERS = { search: '', status: 'open', category: 'all' };
 
 export default function ReportsPage({ archivedOnly = false }) {
   const { user } = useAuth();
-  const pastor = user.role === 'pastor';
+  const pastor = user.role === 'admin';
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

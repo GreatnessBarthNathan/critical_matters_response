@@ -17,7 +17,7 @@ async function createUser({ email, role = 'user', firstName = 'Ada' }) {
     password: PASSWORD,
     recoveryKeyHash: 'LEGACY-RECOVERY-KEY',
     role,
-    ...(role === 'pastor' && { totp: { enabled: true, encryptedSecret: encryptSecret(PASTOR_TOTP_SECRET) } }),
+    ...(role === 'admin' && { totp: { enabled: true, encryptedSecret: encryptSecret(PASTOR_TOTP_SECRET) } }),
   });
 }
 
@@ -51,7 +51,7 @@ async function createReport(app, cookies) {
   const response = await csrf(request(app).post('/api/reports'), cookies)
     .send({
       title: 'Confidential family matter',
-      category: 'family',
+      category: 'general',
       urgency: 'normal',
       content: 'Only the owning leader and the pastor may ever read this text.',
     })
@@ -61,7 +61,7 @@ async function createReport(app, cookies) {
 
 async function buildMatrixFixture(t) {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'pastor' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
   await createUser({ email: 'owner@example.test', firstName: 'Owner' });
   await createUser({ email: 'other@example.test', firstName: 'Other' });
   const pastor = await signedInCookies(app, 'pastor@example.test');

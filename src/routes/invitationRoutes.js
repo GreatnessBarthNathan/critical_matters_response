@@ -1,7 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const controller = require('../controllers/invitationController');
-const { protect, pastorOnly, requirePastorTotp } = require('../middleware/authMiddleware');
+const { protect, adminOnly, requireAdminTotp } = require('../middleware/authMiddleware');
 const { csrfProtection } = require('../middleware/csrfMiddleware');
 const { sendError } = require('../middleware/errorMiddleware');
 
@@ -17,11 +17,11 @@ function publicLimiter(limit, message) {
 
 function createInvitationRoutes({ inspectLimit = 60, redeemLimit = 10 } = {}) {
   const router = express.Router();
-  const pastorOnlyWithCsrf = [protect, requirePastorTotp, pastorOnly, csrfProtection];
+  const adminOnlyWithCsrf = [protect, requireAdminTotp, adminOnly, csrfProtection];
 
-  router.get('/', protect, requirePastorTotp, pastorOnly, controller.list);
-  router.post('/', ...pastorOnlyWithCsrf, controller.create);
-  router.delete('/:id', ...pastorOnlyWithCsrf, controller.revoke);
+  router.get('/', protect, requireAdminTotp, adminOnly, controller.list);
+  router.post('/', ...adminOnlyWithCsrf, controller.create);
+  router.delete('/:id', ...adminOnlyWithCsrf, controller.revoke);
   router.get('/:token', publicLimiter(inspectLimit, 'Too many invitation inspection attempts. Please try again later.'), controller.inspect);
   router.post('/:token/redeem', publicLimiter(redeemLimit, 'Too many invitation redemption attempts. Please try again later.'), controller.redeem);
 

@@ -429,7 +429,7 @@ async function issueAssistedReset({ leaderId, pastor, metadata } = {}) {
       );
       if (!leader) throw authError('USER_NOT_FOUND', 404, 'User not found.');
       await auditService.record({
-        actor: pastor.id || pastor._id, actorRole: 'pastor', action: 'auth.assisted-reset.issue', targetType: 'user', targetId: leader.id,
+        actor: pastor.id || pastor._id, actorRole: 'admin', action: 'auth.assisted-reset.issue', targetType: 'user', targetId: leader.id,
         result: 'success', metadata: requestMetadata(metadata), session,
       });
     });

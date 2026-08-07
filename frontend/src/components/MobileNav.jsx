@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { FilePlus2, Files, KeyRound, LayoutDashboard, MailPlus, UserRound } from 'lucide-react';
 
-// Leaders: Home, Reports, Create, Profile. Pastors: Overview, Reports, Invitations, Security, Profile.
+// Leaders: Home, Reports, Create, Profile. Admins: Overview, Reports, Invitations, Security, Profile.
 export const leaderTabs = [
   { to: '/app', end: true, label: 'Home', icon: LayoutDashboard },
   { to: '/app/reports', end: true, label: 'Reports', icon: Files },
@@ -9,7 +9,7 @@ export const leaderTabs = [
   { to: '/app/profile', label: 'Profile', icon: UserRound },
 ];
 
-export const pastorTabs = [
+export const adminTabs = [
   { to: '/app', end: true, label: 'Overview', icon: LayoutDashboard },
   { to: '/app/reports', end: true, label: 'Reports', icon: Files },
   { to: '/app/invitations', label: 'Invitations', icon: MailPlus },
@@ -18,7 +18,7 @@ export const pastorTabs = [
 ];
 
 export function tabsForRole(role) {
-  return role === 'pastor' ? pastorTabs : leaderTabs;
+  return role === 'admin' ? adminTabs : leaderTabs;
 }
 
 /**

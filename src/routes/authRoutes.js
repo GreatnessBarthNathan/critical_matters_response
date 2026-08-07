@@ -1,7 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const controller = require('../controllers/authController');
-const { protect, requirePastorTotp } = require('../middleware/authMiddleware');
+const { protect, requireAdminTotp } = require('../middleware/authMiddleware');
 const { csrfToken } = require('../middleware/csrfMiddleware');
 const { sendError } = require('../middleware/errorMiddleware');
 
@@ -26,10 +26,10 @@ function createAuthRoutes({
   router.post('/totp/setup', publicLimiter(totpSetupLimit, 'Too many two-factor setup attempts. Please try again later.'), protect, controller.beginTotpSetup);
   router.post('/totp/confirm', publicLimiter(totpConfirmLimit, 'Too many two-factor confirmation attempts. Please try again later.'), protect, controller.confirmTotpSetup);
   router.post('/totp/verify-login', publicLimiter(totpLimit, 'Too many two-factor attempts. Please try again later.'), controller.verifyLoginTotp);
-  router.post('/recovery-codes/regenerate', protect, requirePastorTotp, controller.regenerateRecoveryCodes);
+  router.post('/recovery-codes/regenerate', protect, requireAdminTotp, controller.regenerateRecoveryCodes);
   router.post('/recover-with-code', publicLimiter(recoveryLimit, 'Too many recovery attempts. Please try again later.'), controller.recoverWithCode);
   router.post('/assisted-reset', publicLimiter(recoveryLimit, 'Too many recovery attempts. Please try again later.'), controller.completeAssistedReset);
-  router.patch('/change-password', protect, requirePastorTotp, controller.changePassword);
+  router.patch('/change-password', protect, requireAdminTotp, controller.changePassword);
   return router;
 }
 

@@ -1,19 +1,19 @@
 const User = require('../models/User');
 
-async function seedPastor() {
+async function seedAdmin() {
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const password = process.env.ADMIN_PASSWORD;
   if (!email || !password) {
-    console.warn('Pastor bootstrap skipped: ADMIN_EMAIL and ADMIN_PASSWORD are not both set.');
+    console.warn('Admin bootstrap skipped: ADMIN_EMAIL and ADMIN_PASSWORD are not both set.');
     return;
   }
 
   const existing = await User.findOne({ email }).select('+password');
   if (existing) {
-    if (existing.role !== 'pastor') {
-      existing.role = 'pastor';
+    if (existing.role !== 'admin') {
+      existing.role = 'admin';
       await existing.save();
-      console.log(`Existing account promoted to pastor: ${email}`);
+      console.log(`Existing account promoted to admin: ${email}`);
     }
     return;
   }
@@ -23,9 +23,9 @@ async function seedPastor() {
     lastName: process.env.ADMIN_LAST_NAME || 'Pastor',
     email,
     password,
-    role: 'pastor',
+    role: 'admin',
   });
-  console.log(`Pastor account created: ${email}`);
+  console.log(`Admin account created: ${email}`);
 }
 
-module.exports = seedPastor;
+module.exports = seedAdmin;

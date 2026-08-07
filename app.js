@@ -36,7 +36,7 @@ function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits,
   });
   // Registration is intentionally invitation-only; keep the retired endpoint unambiguously absent.
   app.all('/api/auth/register', notFound);
-  // Invitation admin routes apply protect -> pastorOnly -> CSRF internally.
+  // Invitation admin routes apply protect -> adminOnly -> CSRF internally.
   app.use('/api/invitations', createInvitationRoutes(invitationRateLimits));
   app.use('/api', csrfProtection);
   app.use('/api/auth', createAuthRoutes(authRateLimits));

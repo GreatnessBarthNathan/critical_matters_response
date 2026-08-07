@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
-import PastorRoute from './components/PastorRoute';
+import AdminRoute from './components/AdminRoute';
 import DashboardLayout from './components/DashboardLayout';
 import RootRedirect from './components/RootRedirect';
 import LoginPage from './pages/LoginPage';
@@ -37,7 +37,7 @@ export default function App() {
           <Route path="reports/:id" element={<ReportDetailPage />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route path="help" element={<HelpPage />} />
-          <Route element={<PastorRoute />}>
+          <Route element={<AdminRoute />}>
             <Route path="invitations" element={<InvitationsPage />} />
             <Route path="security" element={<SecurityPage />} />
             <Route path="people" element={<UsersPage />} />

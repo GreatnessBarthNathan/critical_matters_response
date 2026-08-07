@@ -79,20 +79,20 @@ async function run() {
 
   const createApp = require('../app');
   const connectDatabase = require('../src/config/database');
-  const seedPastor = require('../src/utils/seedPastor');
+  const seedAdmin = require('../src/utils/seedAdmin');
 
   await connectDatabase();
 
   try {
     // 1. Pastor bootstrap
-    await seedPastor();
+    await seedAdmin();
     const app = createApp();
     step('pastor account bootstrapped from the environment');
 
     // 2. Pastor TOTP is mandatory before the workspace opens
     let pastor = await signIn(app, PASTOR_EMAIL, PASTOR_PASSWORD);
     const blocked = await asUser(request(app).get('/api/reports'), pastor).expect(403);
-    assert.equal(blocked.body.error.code, 'PASTOR_TOTP_REQUIRED');
+    assert.equal(blocked.body.error.code, 'ADMIN_TOTP_REQUIRED');
 
     const setup = await withCsrf(request(app).post('/api/auth/totp/setup'), pastor)
       .send({ currentPassword: PASTOR_PASSWORD })
@@ -141,7 +141,7 @@ async function run() {
     const created = await withCsrf(request(app).post('/api/reports'), leader)
       .send({
         title: 'A confidential family matter',
-        category: 'family',
+        category: 'general',
         urgency: 'important',
         content: 'The original wording of a private matter, written by the leader.',
       })

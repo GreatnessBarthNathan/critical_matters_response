@@ -76,7 +76,7 @@ export default function SecurityPage() {
         ) : (
           <>
             <p className="muted-note">
-              Two-factor authentication is required for the pastor account. Set it up to unlock the rest of the workspace.
+              Two-factor authentication is required for the admin account. Set it up to unlock the rest of the workspace.
             </p>
             <TotpSetup
               requireCurrentPassword
