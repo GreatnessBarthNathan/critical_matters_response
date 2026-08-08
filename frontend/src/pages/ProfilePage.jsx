@@ -3,6 +3,7 @@ import { KeyRound, RefreshCw, Save, ShieldCheck, UserRound } from 'lucide-react'
 import { api } from '../api/client';
 import RecoveryCodes from '../components/RecoveryCodes';
 import TotpSetup from '../components/TotpSetup';
+import PushNotifications from '../components/PushNotifications';
 import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 
@@ -161,9 +162,7 @@ export default function ProfilePage() {
         ) : (
           <>
             <p className="muted-note">
-              {pastor
-                ? 'Required for the pastor account.'
-                : 'Optional, and strongly recommended. You will be asked for a code from your authenticator app each time you sign in.'}
+              Optional, and strongly recommended. You will be asked for a code from your authenticator app each time you sign in.
             </p>
             <TotpSetup
               requireCurrentPassword
@@ -174,6 +173,11 @@ export default function ProfilePage() {
             />
           </>
         )}
+      </section>
+
+      <section className="panel form-card">
+        <h3><ShieldCheck size={17} aria-hidden="true" /> Push notifications</h3>
+        <PushNotifications onChange={(isEnabled) => setToast({ message: isEnabled ? 'Notifications enabled.' : 'Notifications disabled.' })} />
       </section>
 
       <section className="panel form-card">

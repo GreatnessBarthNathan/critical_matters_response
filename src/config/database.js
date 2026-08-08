@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 // Every model whose indexes enforce a rule, not just performance.
-const INDEXED_MODELS = ['User', 'Report', 'Invitation', 'AuditEvent'];
+const INDEXED_MODELS = ['User', 'Report', 'Invitation', 'AuditEvent', 'PushSubscription'];
 
 async function assertTransactionTopology(connection, env = process.env) {
   if (env.NODE_ENV !== 'production') return;
@@ -21,6 +21,7 @@ async function ensureIndexes() {
   require('../models/Report');
   require('../models/Invitation');
   require('../models/AuditEvent');
+  require('../models/PushSubscription');
 
   await Promise.all(INDEXED_MODELS.map((name) => mongoose.model(name).init()));
 }

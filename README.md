@@ -84,6 +84,18 @@ npm run build && npm start
 `npm install` also installs the frontend. `npm run dev` serves the API on `PORT` (default 5000) and
 Vite on 5173. In production, `npm start` serves the built frontend and the API from one process.
 
+## Browser push notifications
+
+Push notifications are optional and require HTTPS in production. Generate VAPID keys once, put the
+resulting values in your deployment environment, and keep the private key secret:
+
+```bash
+npm run generate:vapid-keys
+```
+
+Set `VAPID_SUBJECT` to a contact URI such as `mailto:admin@yourchurch.org`. Users opt in separately
+on each device from **Profile**. Alerts are deliberately generic and never include report content.
+
 ## First run: admin onboarding
 
 1. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD`, then start the server. The admin account is created or

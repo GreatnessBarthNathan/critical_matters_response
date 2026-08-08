@@ -9,6 +9,7 @@ const reportRoutes = require('./src/routes/reportRoutes');
 const userRoutes = require('./src/routes/userRoutes');
 const createInvitationRoutes = require('./src/routes/invitationRoutes');
 const auditRoutes = require('./src/routes/auditRoutes');
+const pushNotificationRoutes = require('./src/routes/pushNotificationRoutes');
 const { csrfProtection } = require('./src/middleware/csrfMiddleware');
 const { notFound, errorHandler, requestId } = require('./src/middleware/errorMiddleware');
 
@@ -43,6 +44,7 @@ function createApp({ frontendDist: configuredFrontendDist, invitationRateLimits,
   app.use('/api/reports', reportRoutes);
   app.use('/api/users', userRoutes);
   app.use('/api/audit', auditRoutes);
+  app.use('/api/notifications', pushNotificationRoutes);
 
   if (isProduction) {
     const frontendDist = configuredFrontendDist || path.join(__dirname, 'frontend', 'dist');

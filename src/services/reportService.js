@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Report = require('../models/Report');
 const auditService = require('./auditService');
+const pushNotificationService = require('./pushNotificationService');
 
 const OWNER_FIELDS = 'firstName lastName email ministry avatarColor';
 const OWNER_DETAIL_FIELDS = 'firstName lastName email phone ministry avatarColor';
@@ -63,6 +64,14 @@ function safeMetadata({ ip, userAgent, changedFields, reason } = {}) {
 
 function isPastor(user) {
   return user?.role === 'admin';
+}
+
+// Browser notifications are a convenience channel, never part of report persistence. A delivery
+// problem must not make a confidential report or response fail after its transaction committed.
+function sendPushBestEffort(send) {
+  void Promise.resolve()
+    .then(send)
+    .catch((error) => console.error('Push notification delivery failed:', error.message));
 }
 
 // Leaders may only ever reach their own matters; pastors triage every matter.
@@ -161,6 +170,12 @@ async function createReport({ user, input = {}, ip, userAgent }) {
   });
 
   await report.populate('owner', OWNER_FIELDS);
+  sendPushBestEffort(() => pushNotificationService.notifyAdmins({
+    title: 'New private matter',
+    body: 'A church leader has shared a matter for your review.',
+    tag: `report-${report.id}`,
+    url: `/app/reports/${report.id}`,
+  }));
   return report;
 }
 
@@ -373,6 +388,21 @@ async function respond({ user, reportId, message, ip, userAgent }) {
 
   await report.populate('owner', OWNER_FIELDS);
   await report.populate('responses.author', AUTHOR_FIELDS);
+  if (isPastor(user)) {
+    sendPushBestEffort(() => pushNotificationService.deliverToUsers([report.owner._id || report.owner], {
+      title: 'New private response',
+      body: 'You have a new response to one of your matters.',
+      tag: `report-${report.id}`,
+      url: `/app/reports/${report.id}`,
+    }));
+  } else {
+    sendPushBestEffort(() => pushNotificationService.notifyAdmins({
+      title: 'New private response',
+      body: 'A church leader has replied to a matter.',
+      tag: `report-${report.id}`,
+      url: `/app/reports/${report.id}`,
+    }));
+  }
   return report;
 }
 
