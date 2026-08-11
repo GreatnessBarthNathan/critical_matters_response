@@ -32,9 +32,9 @@ export default function DashboardPage() {
   return (
     <div className='dashboard-page'>
       <section className='greeting'>
-        <p className='greeting__eyebrow'>
+        {/* <p className='greeting__eyebrow'>
           {pastor ? 'Pastoral care' : 'Your care space'}
-        </p>
+        </p> */}
       </section>
 
       <div aria-live='polite' role='status'>
