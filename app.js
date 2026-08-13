@@ -8,7 +8,6 @@ const createAuthRoutes = require('./src/routes/authRoutes')
 const reportRoutes = require('./src/routes/reportRoutes')
 const userRoutes = require('./src/routes/userRoutes')
 const createInvitationRoutes = require('./src/routes/invitationRoutes')
-const auditRoutes = require('./src/routes/auditRoutes')
 const pushNotificationRoutes = require('./src/routes/pushNotificationRoutes')
 const { csrfProtection } = require('./src/middleware/csrfMiddleware')
 const {
@@ -54,13 +53,12 @@ function createApp({
   })
   // Registration is intentionally invitation-only; keep the retired endpoint unambiguously absent.
   app.all('/api/auth/register', notFound)
-  // Invitation admin routes apply protect -> adminOnly -> CSRF internally.
+  // Invitation support routes apply protect -> techSupportOnly -> CSRF internally.
   app.use('/api/invitations', createInvitationRoutes(invitationRateLimits))
   app.use('/api', csrfProtection)
   app.use('/api/auth', createAuthRoutes(authRateLimits))
   app.use('/api/reports', reportRoutes)
   app.use('/api/users', userRoutes)
-  app.use('/api/audit', auditRoutes)
   app.use('/api/notifications', pushNotificationRoutes)
 
   if (isProduction) {

@@ -14,10 +14,9 @@ Access is **invitation-only**. There is no public sign-up page, and the service 
 - HTTP-only cookie sessions with a session version, so accounts can be revoked instantly
 - Signed double-submit CSRF protection on every state-changing request
 - One-time, expiring, hashed invitations — the only route to an account
-- TOTP two-factor authentication: required for the pastor, optional for leaders
-- Recovery without email: eight one-time recovery codes, plus pastor-issued reset codes
-- Metadata-only, append-only audit trail with a pastor review screen
-- Auditable report lifecycle with immutable revision history and a read-only archive
+- TOTP two-factor authentication, with recovery codes for every account
+- Recovery without email: eight one-time recovery codes, plus Tech Support-issued reset codes
+- Report lifecycle with immutable revision history and a read-only archive
 - Strict privacy: a leader can only ever reach their own matters
 - Production server that serves `frontend/dist`
 
@@ -60,9 +59,11 @@ node -e "console.log('TOTP_ENCRYPTION_KEY=' + require('crypto').randomBytes(32).
 | `RECOVERY_CODE_PEPPER` | Extra secret mixed into recovery-code hashes. |
 | `RECOVERY_CODE_PREVIOUS_PEPPERS` | Comma-separated old peppers, kept only while rotating. |
 | `INVITATION_TTL_DAYS` | Invitation lifetime. Default 7. |
-| `ASSISTED_RESET_TTL_MINUTES` | Pastor reset-code lifetime. Default 15. |
+| `ASSISTED_RESET_TTL_MINUTES` | Tech Support reset-code lifetime. Default 15. |
 | `TRUST_PROXY_HOPS` | Trusted reverse-proxy hops. Keep `0` unless you run behind one. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Bootstraps or promotes the admin account on startup. |
+| `TECH_SUPPORT_EMAIL` / `TECH_SUPPORT_PASSWORD` | Creates or assigns the restricted technical-support account on startup. |
+| `TECH_SUPPORT_FIRST_NAME` / `TECH_SUPPORT_LAST_NAME` | Optional technical-support display name. Defaults to `Tech Support`. |
 
 Rotating a secret has consequences: changing `JWT_SECRET` signs everyone out, and changing
 `TOTP_ENCRYPTION_KEY` makes every stored authenticator secret unreadable — every user must re-enrol.
@@ -93,8 +94,9 @@ resulting values in your deployment environment, and keep the private key secret
 npm run generate:vapid-keys
 ```
 
-Set `VAPID_SUBJECT` to a contact URI such as `mailto:admin@yourchurch.org`. Users opt in separately
-on each device from **Profile**. Alerts are deliberately generic and never include report content.
+Set `VAPID_SUBJECT` to a contact URI such as `mailto:admin@yourchurch.org`. Leaders and admins opt in
+separately on each device from **Profile**. Tech Support cannot subscribe or receive report alerts.
+Alerts are deliberately generic and never include report content.
 
 ## First run: admin onboarding
 
@@ -105,6 +107,18 @@ on each device from **Profile**. Alerts are deliberately generic and never inclu
    the six-digit code whenever you are ready.
 4. Save the eight recovery codes shown once at the end of setup.
 5. Remove `ADMIN_PASSWORD` from the environment and change the password from **Profile**.
+
+## First run: technical-support onboarding
+
+1. Set `TECH_SUPPORT_EMAIL` and `TECH_SUPPORT_PASSWORD`, then start the server. You can optionally
+   set `TECH_SUPPORT_FIRST_NAME` and `TECH_SUPPORT_LAST_NAME` (they default to `Tech Support`). A new
+   account is created with the `tech_support` role, or an existing account at that address is reassigned to it.
+   `TECH_SUPPORT_EMAIL` must be different from `ADMIN_EMAIL`.
+2. Sign in at `/login` with those details. This role manages invitations, user access and reset codes.
+   It cannot access confidential matter reports or browser push notifications.
+3. **After the first sign-in, remove `TECH_SUPPORT_PASSWORD` from the environment and change the
+   password from Profile.** Leaving a bootstrap password configured is unsafe and lets a future startup
+   reassign any account that uses the configured email.
 
 ## Upgrade existing data
 
@@ -119,7 +133,7 @@ become `sensitive` when their sensitivity was `private`; all other legacy catego
 
 ## Inviting leaders
 
-1. As the pastor, open **Invitations** and enter the leader's email address.
+1. As Tech Support, open **Invitations** and enter the leader's email address.
 2. Copy the generated link immediately — the token is shown once and only its hash is stored.
 3. Share the link privately, in person or through a channel you already trust. It expires after
    `INVITATION_TTL_DAYS` and works exactly once.
@@ -134,12 +148,12 @@ Two paths, both without messaging anyone:
 
 - **Recovery code** — the leader enters their email, one saved recovery code and a new password at
   `/forgot-password`. Each code works once.
-- **Pastor-issued reset code** — if the codes are lost, the pastor verifies who they are speaking to
+- **Tech Support-issued reset code** — if the codes are lost, Tech Support verifies who they are speaking to
   in person or by voice, then generates a one-time code from **Church leaders**. It expires after
   `ASSISTED_RESET_TTL_MINUTES`. Completing the reset revokes the leader's existing sessions.
 
-Passwords are never displayed to the pastor, and the pastor cannot read a leader's matters' contents
-through any administrative screen.
+Passwords are never displayed to Tech Support. Tech Support cannot read a leader's matters' contents
+through any screen; report access belongs only to the leader and the admin handling the report.
 
 ## Security notes for operators
 
@@ -148,10 +162,6 @@ through any administrative screen.
 - **Serve over HTTPS only.** Session cookies are marked `secure` when `NODE_ENV=production`, so
   plain HTTP will not keep anyone signed in.
 - **Set `TRUST_PROXY_HOPS` accurately.** Too high and clients can spoof their IP in the audit trail.
-- **Deny update and delete on the audit collection** at the database-user level. The model already
-  fails closed, but the database should enforce it too.
-- **Keep the audit trail metadata-only.** It records who did what and when — never the content of a
-  matter.
 
 ## Backup and restore checklist
 
@@ -160,9 +170,9 @@ through any administrative screen.
    `TOTP_ENCRYPTION_KEY` and `RECOVERY_CODE_PEPPER` is not fully recoverable.
 3. Restore-test quarterly into a scratch database with `mongorestore`, then confirm the health
    endpoint and one sign-in.
-4. Verify after every restore: the pastor can sign in with two-factor, a leader sees only their own
-   matters, and the audit trail is intact.
-5. Record who holds the secrets and how a lost pastor authenticator would be recovered.
+4. Verify after every restore: an admin can sign in, a leader sees only their own matters, and Tech
+   Support can manage account access without seeing reports.
+5. Record who holds the secrets and how a lost administrator authenticator would be recovered.
 
 ## Health endpoints
 
@@ -194,9 +204,9 @@ npm run build && npm run smoke
 ```
 
 `npm test` runs the API integration suite against an in-memory MongoDB replica set. `npm run check`
-lints and builds the frontend. `npm run smoke` walks the whole release end to end — pastor
-bootstrap and two-factor, invitation and redemption, revisions, cross-leader privacy, both sides of
-the conversation, archive, assisted reset and production serving — and needs `frontend/dist`, so
+lints and builds the frontend. `npm run smoke` walks the whole release end to end — admin bootstrap,
+invitation and redemption, revisions, cross-leader privacy, both sides of the conversation, archive,
+Tech Support-assisted reset and production serving — and needs `frontend/dist`, so
 build first.
 
 ## Pilot checklist (10–20 leaders)
@@ -208,17 +218,16 @@ Before inviting anyone:
 - [ ] Database reachable only from the application server
 - [ ] `npm test` and `npm run check` pass on the deployed commit
 - [ ] `GET /api/health` returns `ok` over HTTPS
-- [ ] Pastor two-factor configured and recovery codes stored offline
+- [ ] Admin recovery codes stored offline
 - [ ] One backup taken and one restore rehearsed
 
 During the pilot:
 
 - [ ] Invite leaders in small batches, confirming each redemption before the next
 - [ ] Confirm with two leaders that neither can see the other's matters
-- [ ] Walk one leader through recovery-code sign-in and one through a pastor-issued reset code
-- [ ] Exercise the full lifecycle once: create, edit (check the revision history), pastor reply,
+- [ ] Walk one leader through recovery-code sign-in and one through a Tech Support-issued reset code
+- [ ] Exercise the full lifecycle once: create, edit (check the revision history), admin reply,
       leader reply, archive, confirm read-only, reopen
-- [ ] Review the audit trail weekly and confirm it contains no matter content
 - [ ] Agree a response-time expectation with leaders, and state plainly that this is not an
       emergency service
 
@@ -232,14 +241,14 @@ Closing the pilot:
 
 ```text
 app.js                 Express application factory (no connect, no listen)
-server.js              Validates the environment, connects, seeds the pastor, listens
+server.js              Validates the environment, connects, seeds bootstrap accounts, listens
 src/config/            Environment validation and database connection
 src/models/            User, Report, Invitation, AuditEvent
-src/services/          auth, invitation, report and audit business rules
+src/services/          auth, invitation and report business rules
 src/controllers/       Thin HTTP handlers that delegate to services
 src/routes/            Route definitions and rate limits
 src/middleware/        Authentication, CSRF, request IDs and error envelope
-src/utils/             Crypto, TOTP, tokens and pastor seeding
+src/utils/             Crypto, TOTP, tokens and account seeding
 test/                  Integration tests over the real HTTP surface
 frontend/src/design/   TGN design tokens
 frontend/src/          React application

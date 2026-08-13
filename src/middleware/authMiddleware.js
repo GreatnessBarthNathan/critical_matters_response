@@ -50,4 +50,24 @@ function adminOnly(req, res, next) {
   return next();
 }
 
-module.exports = { protect, adminOnly };
+function techSupportOnly(req, res, next) {
+  if (req.user?.role !== 'tech_support') {
+    const error = new Error('Tech support access is required.');
+    error.code = 'FORBIDDEN';
+    error.status = 403;
+    return next(error);
+  }
+  return next();
+}
+
+function reportParticipantOnly(req, res, next) {
+  if (!['user', 'admin'].includes(req.user?.role)) {
+    const error = new Error('Confidential matter access is restricted to the sender and pastor.');
+    error.code = 'FORBIDDEN';
+    error.status = 403;
+    return next(error);
+  }
+  return next();
+}
+
+module.exports = { protect, adminOnly, techSupportOnly, reportParticipantOnly };

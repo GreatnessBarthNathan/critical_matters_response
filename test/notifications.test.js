@@ -6,6 +6,7 @@ const { createTestApp } = require('./helpers/testApp');
 const User = require('../src/models/User');
 const PushSubscription = require('../src/models/PushSubscription');
 const AuditEvent = require('../src/models/AuditEvent');
+const pushNotificationService = require('../src/services/pushNotificationService');
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -101,4 +102,45 @@ test('push configuration and subscriptions fail closed on missing configuration 
     .send({ subscription: subscription('https://127.0.0.1/private') })
     .expect(400);
   assert.equal(unsafe.body.error.code, 'VALIDATION_FAILED');
+});
+
+test('tech support cannot configure push notifications or receive deliveries after a role change', async (t) => {
+  const vapid = webpush.generateVAPIDKeys();
+  const prior = {
+    VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
+    VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
+    VAPID_SUBJECT: process.env.VAPID_SUBJECT,
+  };
+  const originalSendNotification = webpush.sendNotification;
+  const deliveredEndpoints = [];
+  process.env.VAPID_PUBLIC_KEY = vapid.publicKey;
+  process.env.VAPID_PRIVATE_KEY = vapid.privateKey;
+  process.env.VAPID_SUBJECT = 'mailto:notifications@example.test';
+  webpush.sendNotification = async ({ endpoint }) => { deliveredEndpoints.push(endpoint); };
+  t.after(() => {
+    restoreVapid(prior);
+    webpush.sendNotification = originalSendNotification;
+  });
+
+  const app = await createTestApp(t);
+  const recipient = await createUser('recipient@example.test');
+  const support = await User.create({
+    firstName: 'Tech', lastName: 'Support', email: 'support@example.test', password: PASSWORD, role: 'tech_support',
+  });
+  const supportCookies = await signedInCookies(app, support.email);
+
+  await authed(request(app).get('/api/notifications/public-key'), supportCookies).expect(403);
+  await csrf(request(app).post('/api/notifications/subscriptions'), supportCookies).send({ subscription: subscription() }).expect(403);
+  await csrf(request(app).delete('/api/notifications/subscriptions'), supportCookies).send({ endpoint: subscription().endpoint }).expect(403);
+
+  await PushSubscription.create([
+    { user: recipient.id, ...subscription('https://fcm.googleapis.com/fcm/send/eligible-recipient') },
+    { user: support.id, ...subscription('https://fcm.googleapis.com/fcm/send/support-recipient') },
+  ]);
+  const result = await pushNotificationService.deliverToUsers([recipient.id, support.id], {
+    title: 'New private response', body: 'A response is ready.', tag: 'report-1', url: '/app/reports/1',
+  });
+
+  assert.equal(result.sent, 1);
+  assert.deepEqual(deliveredEndpoints, ['https://fcm.googleapis.com/fcm/send/eligible-recipient']);
 });

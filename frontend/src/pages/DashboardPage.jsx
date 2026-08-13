@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, Plus } from 'lucide-react'
+import { ArrowRight, MailPlus, Plus, UsersRound } from 'lucide-react'
 import { api } from '../api/client'
 import EmptyState from '../components/EmptyState'
 import ReportCard from '../components/ReportCard'
@@ -10,17 +10,42 @@ import { useAuth } from '../context/AuthContext'
 export default function DashboardPage() {
   const { user } = useAuth()
   const pastor = user.role === 'admin'
+  const techSupport = user.role === 'tech_support'
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (techSupport) {
+      setLoading(false)
+      return undefined
+    }
     api('/reports/stats')
       .then(setData)
       .catch((apiError) => setError(apiError.message))
       // Track loading separately, so a refused request stops the spinner instead of hanging.
       .finally(() => setLoading(false))
-  }, [])
+  }, [techSupport])
+
+  if (techSupport) {
+    return (
+      <div className='dashboard-page'>
+        <section className='page-intro'>
+          <div>
+            <h2>Technical support</h2>
+            <p>Manage secure access and invitations. Confidential matters are not available to this role.</p>
+          </div>
+        </section>
+        <section className='panel section-panel'>
+          <header className='section-panel__header'><h3>Support tools</h3></header>
+          <div className='card-list'>
+            <Link className='button button--ghost button--full' to='/app/invitations'><MailPlus size={17} aria-hidden='true' /> Manage invitations</Link>
+            <Link className='button button--ghost button--full' to='/app/people'><UsersRound size={17} aria-hidden='true' /> Manage accounts</Link>
+          </div>
+        </section>
+      </div>
+    )
+  }
 
   const stats = data?.stats
   // Phones show exactly two high-value numbers: what is open, and what is waiting on you.

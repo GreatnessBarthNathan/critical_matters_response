@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
-import { FilePlus2, Files, KeyRound, LayoutDashboard, MailPlus, UserRound } from 'lucide-react';
+import { FilePlus2, Files, LayoutDashboard, MailPlus, UserRound, UsersRound } from 'lucide-react';
 
-// Leaders: Home, Reports, Create, Profile. Admins: Overview, Reports, Invitations, Security, Profile.
+// Leaders: Home, Reports, Create, Profile. Admins: Reports and Profile only.
 export const leaderTabs = [
   { to: '/app', end: true, label: 'Home', icon: LayoutDashboard },
   { to: '/app/reports', end: true, label: 'Reports', icon: Files },
@@ -10,15 +10,23 @@ export const leaderTabs = [
 ];
 
 export const adminTabs = [
-  { to: '/app', end: true, label: 'Overview', icon: LayoutDashboard },
   { to: '/app/reports', end: true, label: 'Reports', icon: Files },
+  { to: '/app/profile', label: 'Profile', icon: UserRound },
+];
+
+// Technical support has account-administration tools only. Confidential matters are intentionally
+// absent here and are also blocked by the API, not merely hidden in the interface.
+export const techSupportTabs = [
+  { to: '/app', end: true, label: 'Support', icon: LayoutDashboard },
   { to: '/app/invitations', label: 'Invitations', icon: MailPlus },
-  { to: '/app/security', label: 'Security', icon: KeyRound },
+  { to: '/app/people', label: 'Accounts', icon: UsersRound },
   { to: '/app/profile', label: 'Profile', icon: UserRound },
 ];
 
 export function tabsForRole(role) {
-  return role === 'admin' ? adminTabs : leaderTabs;
+  if (role === 'admin') return adminTabs;
+  if (role === 'tech_support') return techSupportTabs;
+  return leaderTabs;
 }
 
 /**

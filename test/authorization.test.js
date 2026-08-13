@@ -1,8 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const express = require('express');
+const cookieParser = require('cookie-parser');
 const request = require('supertest');
 const { createTestApp } = require('./helpers/testApp');
 const User = require('../src/models/User');
+const AuditEvent = require('../src/models/AuditEvent');
+const { protect, techSupportOnly, reportParticipantOnly } = require('../src/middleware/authMiddleware');
 const { authenticator } = require('otplib');
 const { encryptSecret } = require('../src/utils/crypto');
 
@@ -62,14 +66,52 @@ async function createReport(app, cookies) {
 async function buildMatrixFixture(t) {
   const app = await createTestApp(t);
   await createUser({ email: 'pastor@example.test', role: 'admin' });
-  await createUser({ email: 'owner@example.test', firstName: 'Owner' });
+  await createUser({ email: 'support@example.test', role: 'tech_support' });
+  const ownerUser = await createUser({ email: 'owner@example.test', firstName: 'Owner' });
   await createUser({ email: 'other@example.test', firstName: 'Other' });
   const pastor = await signedInCookies(app, 'pastor@example.test');
+  const support = await signedInCookies(app, 'support@example.test');
   const owner = await signedInCookies(app, 'owner@example.test');
   const other = await signedInCookies(app, 'other@example.test');
   const report = await createReport(app, owner);
-  return { app, pastor, owner, other, report };
+  return { app, pastor, support, owner, ownerUser, other, report };
 }
+
+test('tech support role persists and middleware keeps support and report access separate', async (t) => {
+  const app = await createTestApp(t);
+  const gatedApp = express();
+  gatedApp.use(cookieParser());
+  const supportUser = await createUser({ email: 'support@example.test', role: 'tech_support' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'leader@example.test', role: 'user' });
+
+  const auditEvent = await AuditEvent.create({
+    actor: supportUser.id,
+    actorRole: 'tech_support',
+    action: 'support.test',
+    targetType: 'user',
+    targetId: supportUser.id,
+    result: 'success',
+  });
+  assert.equal((await User.findById(supportUser.id)).role, 'tech_support');
+  assert.equal(auditEvent.actorRole, 'tech_support');
+
+  gatedApp.get('/tech-support-only', protect, techSupportOnly, (_req, res) => res.sendStatus(204));
+  gatedApp.get('/report-participant-only', protect, reportParticipantOnly, (_req, res) => res.sendStatus(204));
+  gatedApp.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.code }));
+
+  const support = await signedInCookies(app, 'support@example.test');
+  const pastor = await signedInCookies(app, 'pastor@example.test');
+  const leader = await signedInCookies(app, 'leader@example.test');
+
+  await authed(request(gatedApp).get('/tech-support-only'), support).expect(204);
+  await authed(request(gatedApp).get('/tech-support-only'), pastor).expect(403);
+  await authed(request(gatedApp).get('/tech-support-only'), leader).expect(403);
+
+  await authed(request(gatedApp).get('/report-participant-only'), support).expect(403);
+  await authed(request(gatedApp).get('/report-participant-only'), pastor).expect(204);
+  await authed(request(gatedApp).get('/report-participant-only'), leader).expect(204);
+});
 
 test('privacy matrix rejects every anonymous report operation with 401', async (t) => {
   const { app, report } = await buildMatrixFixture(t);
@@ -81,7 +123,7 @@ test('privacy matrix rejects every anonymous report operation with 401', async (
   await request(app).patch(`/api/reports/${report._id}`).send({ title: 'x' }).expect(401);
   await request(app).post(`/api/reports/${report._id}/responses`).send({ message: 'x' }).expect(401);
   await request(app).patch(`/api/reports/${report._id}/status`).send({ status: 'archived' }).expect(401);
-  await request(app).get('/api/audit').expect(401);
+  await request(app).get('/api/audit').expect(404);
   await request(app).get('/api/invitations').expect(401);
   await request(app).get('/api/users').expect(401);
 });
@@ -99,9 +141,8 @@ test('privacy matrix allows the owning leader every self-service report operatio
   const withRevisions = await authed(request(app).get(`/api/reports/${report._id}`), owner).expect(200);
   assert.equal(withRevisions.body.report.revisions.length, 1);
 
-  // Leaders never reach pastor administration, even with a valid session and CSRF token.
-  const forbiddenAudit = await authed(request(app).get('/api/audit'), owner).expect(403);
-  assert.equal(forbiddenAudit.body.error.code, 'FORBIDDEN');
+  // Leaders never reach support administration, even with a valid session and CSRF token.
+  await authed(request(app).get('/api/audit'), owner).expect(404);
   await authed(request(app).get('/api/invitations'), owner).expect(403);
   await csrf(request(app).post('/api/invitations'), owner).send({ email: 'x@example.test' }).expect(403);
   await authed(request(app).get('/api/users'), owner).expect(403);
@@ -139,62 +180,51 @@ test('privacy matrix lets the pastor triage without rewriting leader text', asyn
     .expect(403);
   assert.equal(rewrite.body.error.code, 'REPORT_FORBIDDEN');
 
-  await authed(request(app).get('/api/audit'), pastor).expect(200);
-  await authed(request(app).get('/api/invitations'), pastor).expect(200);
-  await authed(request(app).get('/api/users'), pastor).expect(200);
+  await authed(request(app).get('/api/audit'), pastor).expect(404);
+  await authed(request(app).get('/api/invitations'), pastor).expect(403);
+  await authed(request(app).get('/api/users'), pastor).expect(403);
 });
 
-test('audit route is pastor-only, filterable, paginated and free of sensitive content', async (t) => {
-  const { app, pastor, owner, report } = await buildMatrixFixture(t);
+test('tech support is denied every report operation and audit is absent for every role', async (t) => {
+  const { app, pastor, support, owner, report } = await buildMatrixFixture(t);
 
-  // The pastor's first access opens the matter; every later read is a plain view.
-  await authed(request(app).get(`/api/reports/${report._id}`), pastor).expect(200);
-  await authed(request(app).get(`/api/reports/${report._id}`), owner).expect(200);
-  await csrf(request(app).patch(`/api/reports/${report._id}`), owner).send({ title: 'Revised subject' }).expect(200);
-  await csrf(request(app).patch(`/api/reports/${report._id}/status`), pastor).send({ status: 'archived' }).expect(200);
+  await authed(request(app).get('/api/reports'), support).expect(403);
+  await authed(request(app).get('/api/reports/stats'), support).expect(403);
+  await authed(request(app).get(`/api/reports/${report._id}`), support).expect(403);
+  await csrf(request(app).post('/api/reports'), support).send({ title: 'x', content: 'y' }).expect(403);
+  await csrf(request(app).patch(`/api/reports/${report._id}`), support).send({ title: 'x' }).expect(403);
+  await csrf(request(app).post(`/api/reports/${report._id}/responses`), support).send({ message: 'x' }).expect(403);
+  await csrf(request(app).patch(`/api/reports/${report._id}/status`), support).send({ status: 'archived' }).expect(403);
 
-  const all = await authed(request(app).get('/api/audit'), pastor).expect(200);
-  const actions = all.body.events.map((event) => event.action);
-  for (const required of ['report.create', 'report.open', 'report.view', 'report.edit', 'report.transition', 'auth.login']) {
-    assert.ok(actions.includes(required), `${required} must be audited`);
-  }
+  await authed(request(app).get('/api/audit'), support).expect(404);
+  await authed(request(app).get('/api/audit'), pastor).expect(404);
+  await authed(request(app).get('/api/audit'), owner).expect(404);
+});
 
-  // Newest first, and never carrying the confidential text of a matter.
-  const timestamps = all.body.events.map((event) => new Date(event.createdAt).getTime());
-  assert.deepEqual(timestamps, [...timestamps].sort((a, b) => b - a));
-  assert.doesNotMatch(JSON.stringify(all.body), /Only the owning leader|Revised subject|Confidential family matter/);
-  for (const event of all.body.events) {
-    assert.deepEqual(
-      Object.keys(event).sort(),
-      ['action', 'actor', 'actorRole', 'createdAt', 'id', 'metadata', 'result', 'targetId', 'targetType'],
-    );
-    for (const key of Object.keys(event.metadata)) {
-      assert.ok(['ip', 'userAgent', 'requestId', 'reason', 'changedFields'].includes(key), `unsafe metadata key ${key}`);
-    }
-  }
+test('tech support can manage a minimal account list while admin and users cannot', async (t) => {
+  const { app, pastor, support, owner, ownerUser } = await buildMatrixFixture(t);
 
-  const filtered = await authed(request(app).get('/api/audit?action=report.edit'), pastor).expect(200);
-  assert.ok(filtered.body.events.length > 0);
-  assert.deepEqual([...new Set(filtered.body.events.map((event) => event.action))], ['report.edit']);
+  const listed = await authed(request(app).get('/api/users'), support).expect(200);
+  assert.equal(listed.body.users.length, 2);
+  assert.deepEqual(Object.keys(listed.body.users[0]).sort(), ['email', 'firstName', 'id', 'isActive', 'lastName']);
+  assert.equal(listed.body.users.some((user) => user.phone !== undefined || user.reportCount !== undefined), false);
 
-  const byTarget = await authed(request(app).get('/api/audit?targetType=report&result=success'), pastor).expect(200);
-  assert.deepEqual([...new Set(byTarget.body.events.map((event) => event.targetType))], ['report']);
+  await csrf(request(app).patch('/api/users/profile'), owner).send({ bio: 'Still self-service.' }).expect(200);
+  await csrf(request(app).patch(`/api/users/${ownerUser.id}/status`), owner).send({ isActive: false }).expect(403);
+  await csrf(request(app).post(`/api/users/${ownerUser.id}/reset-code`), owner).expect(403);
+  await csrf(request(app).post(`/api/users/${ownerUser.id}/reset-code`), support).expect(201);
+  const resetEvent = await AuditEvent.findOne({ action: 'auth.assisted-reset.issue', targetId: String(ownerUser.id) }).lean();
+  assert.equal(resetEvent.actorRole, 'tech_support');
+  const status = await csrf(request(app).patch(`/api/users/${ownerUser.id}/status`), support).send({ isActive: false }).expect(200);
+  assert.deepEqual(Object.keys(status.body.user).sort(), ['email', 'firstName', 'id', 'isActive', 'lastName']);
+  assert.equal(status.body.user.id, ownerUser.id);
+  assert.equal(status.body.user.isActive, false);
+  const statusEvent = await AuditEvent.findOne({ action: 'account.status_changed', targetId: String(ownerUser.id) }).lean();
+  assert.equal(statusEvent.actorRole, 'tech_support');
 
-  const byActor = await authed(request(app).get(`/api/audit?actor=${report.owner._id || report.owner}`), pastor).expect(200);
-  assert.ok(byActor.body.events.length > 0);
-  assert.deepEqual([...new Set(byActor.body.events.map((event) => String(event.actor?.id ?? event.actor)))], [String(report.owner._id || report.owner)]);
-
-  const paged = await authed(request(app).get('/api/audit?page=1&limit=2'), pastor).expect(200);
-  assert.equal(paged.body.events.length, 2);
-  assert.equal(paged.body.pagination.limit, 2);
-  assert.equal(paged.body.pagination.page, 1);
-  assert.ok(paged.body.pagination.total >= 5);
-
-  const futureOnly = await authed(request(app).get('/api/audit?from=2999-01-01'), pastor).expect(200);
-  assert.equal(futureOnly.body.events.length, 0);
-
-  const invalidFilter = await authed(request(app).get('/api/audit?result=maybe'), pastor).expect(400);
-  assert.equal(invalidFilter.body.error.code, 'VALIDATION_FAILED');
+  await authed(request(app).get('/api/users'), pastor).expect(403);
+  await csrf(request(app).patch(`/api/users/${ownerUser.id}/status`), pastor).send({ isActive: true }).expect(403);
+  await csrf(request(app).post(`/api/users/${ownerUser.id}/reset-code`), pastor).expect(403);
 });
 
 test('errors use the stable envelope and never leak stack traces', async (t) => {

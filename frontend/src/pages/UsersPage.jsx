@@ -8,7 +8,7 @@ export default function UsersPage() {
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
   const [toast, setToast] = useState(null)
-  // Reset codes are shown once, for the pastor to read aloud after verifying the person.
+  // Reset codes are shown once, after support verifies the person requesting access.
   const [resetCode, setResetCode] = useState(null)
   const [copied, setCopied] = useState(false)
 
@@ -22,7 +22,7 @@ export default function UsersPage() {
     const needle = search.trim().toLowerCase()
     if (!needle) return users
     return users.filter((item) =>
-      `${item.firstName} ${item.lastName} ${item.email} ${item.ministry ?? ''}`
+      `${item.firstName} ${item.lastName} ${item.email}`
         .toLowerCase()
         .includes(needle),
     )
@@ -78,7 +78,7 @@ export default function UsersPage() {
 
       <div className='page-intro'>
         <div>
-          <h2>Leaders</h2>
+          <h2>Accounts</h2>
           <p>Activate accounts and issue one-time reset codes.</p>
         </div>
       </div>
@@ -131,8 +131,8 @@ export default function UsersPage() {
           <Search size={17} aria-hidden='true' />
           <input
             type='search'
-            aria-label='Search leaders'
-            placeholder='Search by name, email or ministry'
+            aria-label='Search accounts'
+            placeholder='Search by name or email'
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -142,12 +142,12 @@ export default function UsersPage() {
       <section className='panel section-panel'>
         <header className='section-panel__header'>
           <h3>
-            {filtered.length} {filtered.length === 1 ? 'leader' : 'leaders'}
+            {filtered.length} {filtered.length === 1 ? 'account' : 'accounts'}
           </h3>
         </header>
 
         {filtered.length === 0 ? (
-          <p className='empty-note'>No leaders match this search.</p>
+          <p className='empty-note'>No accounts match this search.</p>
         ) : (
           <ul className='record-list'>
             {filtered.map((item) => (
@@ -157,10 +157,6 @@ export default function UsersPage() {
                     {item.firstName} {item.lastName}
                   </strong>
                   <small>{item.email}</small>
-                  <small>
-                    {item.ministry || 'Church leader'} · {item.reportCount}{' '}
-                    matters, {item.openCount} open
-                  </small>
                 </div>
                 <span
                   className={`status-badge status-badge--${item.isActive ? 'blue' : 'neutral'}`}
