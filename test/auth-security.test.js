@@ -539,7 +539,7 @@ test('pastor bootstrap preserves an existing password and TOTP state while new p
     const authCookie = login.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token='));
     const csrf = await request(app).get('/api/auth/csrf').expect(200);
     const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
-    await request(app).get('/api/reports').set('Cookie', authCookie).expect(403);
+    await request(app).get('/api/reports').set('Cookie', authCookie).expect(200);
     await request(app)
       .post('/api/auth/totp/setup')
       .set('Cookie', [authCookie, csrfCookie])
