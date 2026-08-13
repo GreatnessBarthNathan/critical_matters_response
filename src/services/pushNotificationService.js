@@ -148,7 +148,14 @@ async function deliverToUsers(userIds, notification) {
     return { sent: 0, removed: 0, skipped: true };
   }
 
-  const subscriptions = await PushSubscription.find({ user: { $in: userIds } }).lean();
+  // Roles can change after a browser subscription was created. Resolve recipients from the
+  // current user record so technical-support accounts never receive report notifications.
+  const recipients = await User.find({ _id: { $in: userIds }, role: { $in: ['user', 'admin'] }, isActive: true })
+    .select('_id')
+    .lean();
+  if (!recipients.length) return { sent: 0, removed: 0, skipped: false };
+
+  const subscriptions = await PushSubscription.find({ user: { $in: recipients.map((recipient) => recipient._id) } }).lean();
   const payload = JSON.stringify({
     title: notification.title,
     body: notification.body,

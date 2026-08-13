@@ -4,7 +4,7 @@ import { KeyRound, LockKeyhole, Mail } from 'lucide-react'
 import AuthLayout from '../components/AuthLayout'
 import { api } from '../api/client'
 
-// Two no-email paths: a code you saved yourself, or a one-time code your pastor reads to you.
+// Two no-email paths: a code you saved yourself, or a one-time code from Tech Support.
 const PATHS = {
   recovery: {
     label: 'I have a recovery code',
@@ -14,11 +14,11 @@ const PATHS = {
     hint: 'Use one of the codes you saved when your account was created. Each code works once.',
   },
   assisted: {
-    label: 'Admin gave me a code',
+    label: 'Tech Support gave me a code',
     endpoint: '/auth/assisted-reset',
     codeField: 'resetCode',
-    codeLabel: 'Reset code from admin',
-    hint: 'Ask admin to issue a reset code. It expires shortly after being created.',
+    codeLabel: 'Reset code from Tech Support',
+    hint: 'Ask Tech Support to issue a reset code. It expires shortly after being created.',
   },
 }
 

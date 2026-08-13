@@ -80,7 +80,7 @@ export default function LoginPage() {
         </button>
       </form>
 
-      {/* No public registration: access begins with a pastor's invitation. */}
+      {/* No public registration: access begins with a Tech Support invitation. */}
       <p className="auth-switch"><Link to="/forgot-password">Trouble signing in?</Link></p>
     </AuthLayout>
   );

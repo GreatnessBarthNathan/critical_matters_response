@@ -176,10 +176,12 @@ export default function ProfilePage() {
         )}
       </section>
 
-      <section className="panel form-card">
-        <h3><ShieldCheck size={17} aria-hidden="true" /> Push notifications</h3>
-        <PushNotifications onChange={(isEnabled) => setToast({ message: isEnabled ? 'Notifications enabled.' : 'Notifications disabled.' })} />
-      </section>
+      {!techSupport && (
+        <section className="panel form-card">
+          <h3><ShieldCheck size={17} aria-hidden="true" /> Push notifications</h3>
+          <PushNotifications onChange={(isEnabled) => setToast({ message: isEnabled ? 'Notifications enabled.' : 'Notifications disabled.' })} />
+        </section>
+      )}
 
       <section className="panel form-card">
         <h3><RefreshCw size={17} aria-hidden="true" /> Recovery codes</h3>

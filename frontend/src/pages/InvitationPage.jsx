@@ -80,7 +80,7 @@ export default function InvitationPage() {
         subtitle="It may have expired, already been used, or been withdrawn."
         footer={<p className="auth-switch"><Link to="/login">Return to sign in</Link></p>}
       >
-        <p className="muted-note">Ask your pastor to send a new invitation.</p>
+        <p className="muted-note">Ask Tech Support to send a new invitation.</p>
       </AuthLayout>
     );
   }

@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import RecoveryCodes from './RecoveryCodes';
 
 /**
- * Shared authenticator enrolment. Required for pastors, optional for leaders.
+ * Shared authenticator enrolment. Required for admins, optional for leaders.
  * On success it hands back the one-time recovery codes for the caller to acknowledge.
  */
 export default function TotpSetup({ onEnabled, requireCurrentPassword = false }) {
