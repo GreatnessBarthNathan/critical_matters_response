@@ -63,6 +63,8 @@ node -e "console.log('TOTP_ENCRYPTION_KEY=' + require('crypto').randomBytes(32).
 | `ASSISTED_RESET_TTL_MINUTES` | Pastor reset-code lifetime. Default 15. |
 | `TRUST_PROXY_HOPS` | Trusted reverse-proxy hops. Keep `0` unless you run behind one. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Bootstraps or promotes the admin account on startup. |
+| `TECH_SUPPORT_EMAIL` / `TECH_SUPPORT_PASSWORD` | Creates or assigns the restricted technical-support account on startup. |
+| `TECH_SUPPORT_FIRST_NAME` / `TECH_SUPPORT_LAST_NAME` | Optional technical-support display name. Defaults to `Tech Support`. |
 
 Rotating a secret has consequences: changing `JWT_SECRET` signs everyone out, and changing
 `TOTP_ENCRYPTION_KEY` makes every stored authenticator secret unreadable — every user must re-enrol.
@@ -105,6 +107,18 @@ on each device from **Profile**. Alerts are deliberately generic and never inclu
    the six-digit code whenever you are ready.
 4. Save the eight recovery codes shown once at the end of setup.
 5. Remove `ADMIN_PASSWORD` from the environment and change the password from **Profile**.
+
+## First run: technical-support onboarding
+
+1. Set `TECH_SUPPORT_EMAIL` and `TECH_SUPPORT_PASSWORD`, then start the server. You can optionally
+   set `TECH_SUPPORT_FIRST_NAME` and `TECH_SUPPORT_LAST_NAME` (they default to `Tech Support`). A new
+   account is created with the `tech_support` role, or an existing account at that address is reassigned to it.
+   `TECH_SUPPORT_EMAIL` must be different from `ADMIN_EMAIL`.
+2. Sign in at `/login` with those details. This role can manage invitations, user access, reset codes,
+   and non-report audit activity; it cannot access confidential matter reports.
+3. **After the first sign-in, remove `TECH_SUPPORT_PASSWORD` from the environment and change the
+   password from Profile.** Leaving a bootstrap password configured is unsafe and lets a future startup
+   reassign any account that uses the configured email.
 
 ## Upgrade existing data
 

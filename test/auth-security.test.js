@@ -8,7 +8,25 @@ const { authenticator } = require('otplib');
 const auditService = require('../src/services/auditService');
 const authService = require('../src/services/authService');
 const seedAdmin = require('../src/utils/seedAdmin');
+const seedTechSupport = require('../src/utils/seedTechSupport');
+const { validateBootstrapAccounts } = require('../server');
 const { encryptSecret, hashToken } = require('../src/utils/crypto');
+
+function setEnvironmentForTest(t, values) {
+  const previous = Object.fromEntries(
+    Object.keys(values).map((key) => [key, process.env[key]]),
+  );
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
 
 async function createUser() {
   return User.create({
@@ -533,6 +551,70 @@ test('pastor bootstrap preserves an existing password and TOTP state while new p
       else process.env[key] = value;
     }
   }
+});
+
+test('tech support bootstrap creates a configured account with the restricted role', async (t) => {
+  await createTestApp(t);
+  setEnvironmentForTest(t, {
+    TECH_SUPPORT_EMAIL: 'support-bootstrap@example.test',
+    TECH_SUPPORT_PASSWORD: 'support bootstrap password',
+    TECH_SUPPORT_FIRST_NAME: undefined,
+    TECH_SUPPORT_LAST_NAME: undefined,
+  });
+
+  await seedTechSupport();
+
+  const support = await User.findOne({ email: process.env.TECH_SUPPORT_EMAIL }).select('+password');
+  assert.equal(support.firstName, 'Tech');
+  assert.equal(support.lastName, 'Support');
+  assert.equal(support.role, 'tech_support');
+  assert.equal(await support.comparePassword('support bootstrap password'), true);
+});
+
+test('tech support bootstrap promotes an existing account without changing its password', async (t) => {
+  await createTestApp(t);
+  const existing = await User.create({
+    firstName: 'Existing', lastName: 'Leader', email: 'support-bootstrap@example.test', password: 'original secure password',
+  });
+  setEnvironmentForTest(t, {
+    TECH_SUPPORT_EMAIL: existing.email,
+    TECH_SUPPORT_PASSWORD: 'replacement secure password',
+    TECH_SUPPORT_FIRST_NAME: 'Ignored',
+    TECH_SUPPORT_LAST_NAME: 'Values',
+  });
+
+  await seedTechSupport();
+
+  const promoted = await User.findById(existing.id).select('+password');
+  assert.equal(promoted.role, 'tech_support');
+  assert.equal(promoted.firstName, 'Existing');
+  assert.equal(promoted.lastName, 'Leader');
+  assert.equal(await promoted.comparePassword('original secure password'), true);
+});
+
+test('tech support bootstrap does nothing without both credentials', async (t) => {
+  await createTestApp(t);
+  setEnvironmentForTest(t, {
+    TECH_SUPPORT_EMAIL: 'support-bootstrap@example.test',
+    TECH_SUPPORT_PASSWORD: undefined,
+    TECH_SUPPORT_FIRST_NAME: undefined,
+    TECH_SUPPORT_LAST_NAME: undefined,
+  });
+
+  await seedTechSupport();
+
+  assert.equal(await User.countDocuments({}), 0);
+});
+
+test('bootstrap accounts reject matching normalized addresses and allow distinct or missing support configuration', () => {
+  assert.throws(
+    () => validateBootstrapAccounts({ ADMIN_EMAIL: ' Pastor@example.test ', TECH_SUPPORT_EMAIL: 'pastor@EXAMPLE.test' }),
+    /ADMIN_EMAIL and TECH_SUPPORT_EMAIL must be different addresses/,
+  );
+  assert.doesNotThrow(() => validateBootstrapAccounts({
+    ADMIN_EMAIL: 'pastor@example.test', TECH_SUPPORT_EMAIL: 'support@example.test',
+  }));
+  assert.doesNotThrow(() => validateBootstrapAccounts({ ADMIN_EMAIL: 'pastor@example.test' }));
 });
 
 test('status changes are audited transactionally and audit failures roll back session revocation', async (t) => {
