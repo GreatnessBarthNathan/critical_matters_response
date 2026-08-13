@@ -36,7 +36,7 @@ export default function CreateReportPage() {
     }
   }, [form]);
 
-  if (user.role === 'admin') return <Navigate to="/app/reports" replace />;
+  if (user.role !== 'user') return <Navigate to="/app" replace />;
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
   const needsAcknowledgement = form.urgency === 'urgent';

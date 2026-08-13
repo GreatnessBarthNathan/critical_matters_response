@@ -20,6 +20,7 @@ export default function ProfilePage() {
   useEffect(() => setForm(user), [user]);
 
   const pastor = user.role === 'admin';
+  const techSupport = user.role === 'tech_support';
   const totpEnabled = Boolean(user.totpEnabled);
 
   const save = async (event) => {
@@ -77,7 +78,7 @@ export default function ProfilePage() {
           {form.firstName[0]}{form.lastName[0]}
         </span>
         <h3>{form.firstName} {form.lastName}</h3>
-        <p>{pastor ? 'Admin' : form.ministry || 'Church leader'}</p>
+        <p>{pastor ? 'Admin' : techSupport ? 'Tech support' : form.ministry || 'Church leader'}</p>
         <fieldset className="colour-picker">
           <legend>Profile colour</legend>
           {COLOURS.map((colour) => (

@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Archive, CircleHelp, LogOut, UsersRound } from 'lucide-react'
+import { Archive, CircleHelp, LogOut } from 'lucide-react'
 import Brand from './Brand'
 import MobileNav, { tabsForRole } from './MobileNav'
 import { useAuth } from '../context/AuthContext'
@@ -12,7 +12,9 @@ const secondaryLinks = {
   ],
   admin: [
     { to: '/app/reports/archived', label: 'Archive', icon: Archive },
-    { to: '/app/people', label: 'Leaders', icon: UsersRound },
+    { to: '/app/help', label: 'Help & privacy', icon: CircleHelp },
+  ],
+  tech_support: [
     { to: '/app/help', label: 'Help & privacy', icon: CircleHelp },
   ],
 }
@@ -23,16 +25,17 @@ const TITLES = [
   ['/app/reports/', 'Matter'],
   ['/app/reports', 'Matters'],
   ['/app/invitations', 'Invitations'],
-  ['/app/security', 'Security & audit'],
   ['/app/profile', 'Profile'],
-  ['/app/people', 'Leaders'],
+  ['/app/people', 'Accounts'],
   ['/app/help', 'Help & privacy'],
 ]
 
 function pageTitle(pathname, role) {
   const match = TITLES.find(([prefix]) => pathname.startsWith(prefix))
   if (match) return match[1]
-  return role === 'admin' ? 'Overview' : 'Home'
+  if (role === 'admin') return 'Overview'
+  if (role === 'tech_support') return 'Support'
+  return 'Home'
 }
 
 export default function DashboardLayout() {
@@ -40,7 +43,7 @@ export default function DashboardLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const primary = tabsForRole(user.role)
-  const secondary = secondaryLinks[user.role === 'admin' ? 'admin' : 'user']
+  const secondary = secondaryLinks[user.role] || secondaryLinks.user
 
   const signOut = async () => {
     await logout()
@@ -72,7 +75,9 @@ export default function DashboardLayout() {
             <small>
               {user.role === 'admin'
                 ? 'Admin'
-                : user.ministry || 'Church leader'}
+                : user.role === 'tech_support'
+                  ? 'Tech support'
+                  : user.ministry || 'Church leader'}
             </small>
           </span>
         </div>
