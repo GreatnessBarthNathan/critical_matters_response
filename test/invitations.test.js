@@ -52,26 +52,29 @@ async function createInvitation(app, cookies, email = 'invitee@example.test') {
   return response.body;
 }
 
-test('pastors can create invitations, while anonymous and non-pastor users cannot', async (t) => {
+test('tech support can create invitations, while anonymous, admins, and users cannot', async (t) => {
   const app = await createTestApp(t);
   await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'support@example.test', role: 'tech_support' });
   await createUser({ email: 'leader@example.test' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
+  const supportCookies = await signedInCookies(app, 'support@example.test');
   const leaderCookies = await signedInCookies(app, 'leader@example.test');
 
-  const created = await createInvitation(app, pastorCookies);
+  const created = await createInvitation(app, supportCookies);
   assert.match(created.token, /^[A-Za-z0-9_-]{40,}$/);
   assert.equal(created.invitation.email, 'invitee@example.test');
   assert.equal(created.invitation.status, 'active');
 
   await request(app).post('/api/invitations').send({ email: 'nope@example.test' }).expect(401);
+  await csrf(request(app).post('/api/invitations'), pastorCookies).send({ email: 'nope@example.test' }).expect(403);
   await csrf(request(app).post('/api/invitations'), leaderCookies).send({ email: 'nope@example.test' }).expect(403);
   await request(app).post('/api/auth/register').send({}).expect(404);
 });
 
 test('inspection is neutral and redemption creates a session with one-time recovery codes', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const created = await createInvitation(app, pastorCookies, 'new.person@example.test');
 
@@ -115,7 +118,7 @@ test('inspection is neutral and redemption creates a session with one-time recov
 
 test('invalid invitation states and body email mismatch return the same neutral response', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const expired = await createInvitation(app, pastorCookies, 'expired@example.test');
   const revoked = await createInvitation(app, pastorCookies, 'revoked@example.test');
@@ -150,7 +153,7 @@ test('invalid invitation states and body email mismatch return the same neutral 
 
 test('a pre-existing account cannot redeem an invitation for its email', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
   await createUser({ email: 'existing@example.test' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const created = await createInvitation(app, pastorCookies, 'existing@example.test');
@@ -166,7 +169,7 @@ test('a pre-existing account cannot redeem an invitation for its email', async (
 
 test('parallel invitation creation leaves one active invitation and at most one redeemable token', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const completionOrder = [];
   const attempts = await Promise.all([1, 2].map(async () => {
@@ -197,7 +200,7 @@ test('parallel invitation creation leaves one active invitation and at most one 
 
 test('failed transactional invitation creation or replacement audit leaves no changed invitation state', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const originalRecord = auditService.record;
   auditService.record = async (input) => {
@@ -231,7 +234,7 @@ test('failed transactional invitation creation or replacement audit leaves no ch
 
 test('failed transactional revocation audit leaves the invitation active', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const created = await createInvitation(app, pastorCookies, 'revoke-audit-failure@example.test');
   const originalRecord = auditService.record;
@@ -252,7 +255,7 @@ test('failed transactional revocation audit leaves the invitation active', async
 
 test('concurrent revocation and redemption have exactly one winner', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const created = await createInvitation(app, pastorCookies, 'race@example.test');
   const [revocation, redemption] = await Promise.all([
@@ -273,7 +276,7 @@ test('concurrent revocation and redemption have exactly one winner', async (t) =
 
 test('a failed transactional success audit rolls back redemption completely', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const created = await createInvitation(app, pastorCookies, 'rollback@example.test');
   const originalRecord = auditService.record;
@@ -323,7 +326,7 @@ test('public inspection and redemption endpoints are independently rate limited 
 
 test('regenerating an invitation revokes its predecessor and no plaintext token is retained', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   const first = await createInvitation(app, pastorCookies, 'same@example.test');
   const second = await createInvitation(app, pastorCookies, 'same@example.test');
@@ -339,19 +342,23 @@ test('regenerating an invitation revokes its predecessor and no plaintext token 
   await request(app).get(`/api/invitations/${first.token}`).expect(400);
 });
 
-test('listing and revocation are pastor-only and invitation audit records exclude sensitive content', async (t) => {
+test('listing and revocation are tech-support-only and invitation audit records exclude sensitive content', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
+  await createUser({ email: 'admin@example.test', role: 'admin' });
   await createUser({ email: 'leader@example.test' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
+  const adminCookies = await signedInCookies(app, 'admin@example.test');
   const leaderCookies = await signedInCookies(app, 'leader@example.test');
   const created = await createInvitation(app, pastorCookies, 'audit.person@example.test');
 
   await request(app).get('/api/invitations').expect(401);
   await request(app).get('/api/invitations').set('Cookie', leaderCookies.authCookie).expect(403);
+  await request(app).get('/api/invitations').set('Cookie', adminCookies.authCookie).expect(403);
   const listed = await request(app).get('/api/invitations').set('Cookie', pastorCookies.authCookie).expect(200);
   assert.equal(listed.body.invitations.length, 1);
   await csrf(request(app).delete(`/api/invitations/${created.invitation.id}`), leaderCookies).expect(403);
+  await csrf(request(app).delete(`/api/invitations/${created.invitation.id}`), adminCookies).expect(403);
   await csrf(request(app).delete(`/api/invitations/${created.invitation.id}`), pastorCookies).expect(200);
 
   const auditText = JSON.stringify(await AuditEvent.find().lean());
@@ -360,11 +367,13 @@ test('listing and revocation are pastor-only and invitation audit records exclud
   assert.doesNotMatch(auditText, /report content/i);
   assert.match(auditText, /invitation\.create/);
   assert.match(auditText, /invitation\.revoke/);
+  const actorRoles = await AuditEvent.find({ action: { $in: ['invitation.create', 'invitation.revoke'] } }).distinct('actorRole');
+  assert.deepEqual(actorRoles, ['tech_support']);
 });
 
 test('invitation listing is paginated and retention uses a 30-day TTL index', async (t) => {
   const app = await createTestApp(t);
-  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'pastor@example.test', role: 'tech_support' });
   const pastorCookies = await signedInCookies(app, 'pastor@example.test');
   await createInvitation(app, pastorCookies, 'page-one@example.test');
   await createInvitation(app, pastorCookies, 'page-two@example.test');

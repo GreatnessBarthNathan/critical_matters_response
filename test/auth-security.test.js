@@ -9,7 +9,6 @@ const auditService = require('../src/services/auditService');
 const authService = require('../src/services/authService');
 const seedAdmin = require('../src/utils/seedAdmin');
 const { encryptSecret, hashToken } = require('../src/utils/crypto');
-const { signToken } = require('../src/utils/authToken');
 
 async function createUser() {
   return User.create({
@@ -21,10 +20,10 @@ async function createUser() {
   });
 }
 
-async function signIn(app) {
+async function signIn(app, email = 'ada@example.test') {
   const response = await request(app)
     .post('/api/auth/login')
-    .send({ email: 'ada@example.test', password: 'correct horse battery staple' })
+    .send({ email, password: 'correct horse battery staple' })
     .expect(200);
   return response.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token='));
 }
@@ -250,8 +249,16 @@ test('an unconfigured admin can use the workspace before optional TOTP enrolment
   const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
   await request(app).get('/api/auth/me').set('Cookie', authCookie).expect(200);
   await request(app).get('/api/reports').set('Cookie', authCookie).expect(200);
-  await request(app).get('/api/invitations').set('Cookie', authCookie).expect(200);
-  await request(app).get('/api/users').set('Cookie', authCookie).expect(200);
+  await request(app).get('/api/invitations').set('Cookie', authCookie).expect(403);
+  await request(app).get('/api/users').set('Cookie', authCookie).expect(403);
+
+  await User.create({
+    firstName: 'Tech', lastName: 'Support', email: 'support@example.test', role: 'tech_support',
+    password: 'correct horse battery staple', recoveryKeyHash: 'SUPPORT-LEGACY-KEY',
+  });
+  const supportCookie = await signIn(app, 'support@example.test');
+  await request(app).get('/api/invitations').set('Cookie', supportCookie).expect(200);
+  await request(app).get('/api/users').set('Cookie', supportCookie).expect(200);
 
   const setup = await request(app)
     .post('/api/auth/totp/setup')
@@ -268,43 +275,34 @@ test('an unconfigured admin can use the workspace before optional TOTP enrolment
     .expect(200);
   await request(app)
     .post('/api/invitations')
-    .set('Cookie', [authCookie, csrfCookie])
+    .set('Cookie', [supportCookie, csrfCookie])
     .set('X-CSRF-Token', csrf.body.csrfToken)
     .send({ email: 'new.leader@example.test' })
     .expect(201);
 });
 
-test('pastor-assisted reset is single use, neutral on failure, and revokes the leader session', async (t) => {
+test('tech-support-assisted reset is single use, neutral on failure, and revokes the leader session', async (t) => {
   const app = await createTestApp(t);
   const leader = await User.create({
     firstName: 'Leader', lastName: 'One', email: 'leader@example.test', password: 'correct horse battery staple', recoveryKeyHash: 'LEADER-LEGACY-KEY',
   });
-  const secret = authenticator.generateSecret();
-  const { encryptSecret } = require('../src/utils/crypto');
   await User.create({
-    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'admin', password: 'correct horse battery staple', recoveryKeyHash: 'PASTOR-LEGACY-KEY',
-    totp: { enabled: true, encryptedSecret: encryptSecret(secret) },
+    firstName: 'Tech', lastName: 'Support', email: 'support@example.test', role: 'tech_support', password: 'correct horse battery staple', recoveryKeyHash: 'SUPPORT-LEGACY-KEY',
   });
   const leaderCookie = await request(app).post('/api/auth/login').send({ email: 'leader@example.test', password: 'correct horse battery staple' })
     .expect(200).then((response) => response.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token=')));
-  const login = await request(app).post('/api/auth/login').send({ email: 'pastor@example.test', password: 'correct horse battery staple' }).expect(200);
-  const pendingCookie = login.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_pending='));
   const csrf = await request(app).get('/api/auth/csrf').expect(200);
   const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
-  const pastorCookie = await request(app)
-    .post('/api/auth/totp/verify-login')
-    .set('Cookie', [pendingCookie, csrfCookie])
-    .set('X-CSRF-Token', csrf.body.csrfToken)
-    .send({ token: authenticator.generate(secret) })
-    .expect(200)
-    .then((response) => response.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token=')));
+  const supportCookie = await signIn(app, 'support@example.test');
   const issued = await request(app)
     .post(`/api/users/${leader.id}/reset-code`)
-    .set('Cookie', [pastorCookie, csrfCookie])
+    .set('Cookie', [supportCookie, csrfCookie])
     .set('X-CSRF-Token', csrf.body.csrfToken)
     .send({})
     .expect(201);
   assert.match(issued.body.resetCode, /^[A-Za-z0-9_-]{32}$/);
+  const resetEvent = await AuditEvent.findOne({ action: 'auth.assisted-reset.issue', targetId: leader.id }).lean();
+  assert.equal(resetEvent.actorRole, 'tech_support');
 
   await request(app)
     .post('/api/auth/assisted-reset')
@@ -467,30 +465,21 @@ test('expired assisted reset is neutral and deactivation permanently revokes old
     .expect(400);
   assert.equal(expired.body.error.code, 'INVALID_RECOVERY');
 
-  const secret = authenticator.generateSecret();
-  const pastor = await User.create({
-    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'admin', password: 'correct horse battery staple',
-    totp: { enabled: true, encryptedSecret: encryptSecret(secret) },
+  const support = await User.create({
+    firstName: 'Tech', lastName: 'Support', email: 'support@example.test', role: 'tech_support', password: 'correct horse battery staple',
   });
   const leaderCookie = await signIn(app);
-  const pastorLogin = await request(app).post('/api/auth/login').send({ email: pastor.email, password: 'correct horse battery staple' }).expect(200);
-  const pastorCookie = await request(app)
-    .post('/api/auth/totp/verify-login')
-    .set('Cookie', [pastorLogin.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_totp_pending=')), csrfCookie])
-    .set('X-CSRF-Token', csrf.body.csrfToken)
-    .send({ token: authenticator.generate(secret) })
-    .expect(200)
-    .then((response) => response.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_token=')));
+  const supportCookie = await signIn(app, support.email);
   await request(app)
     .patch(`/api/users/${leader.id}/status`)
-    .set('Cookie', [pastorCookie, csrfCookie])
+    .set('Cookie', [supportCookie, csrfCookie])
     .set('X-CSRF-Token', csrf.body.csrfToken)
     .send({ isActive: false })
     .expect(200);
   await request(app).get('/api/auth/me').set('Cookie', leaderCookie).expect(401);
   await request(app)
     .patch(`/api/users/${leader.id}/status`)
-    .set('Cookie', [pastorCookie, csrfCookie])
+    .set('Cookie', [supportCookie, csrfCookie])
     .set('X-CSRF-Token', csrf.body.csrfToken)
     .send({ isActive: true })
     .expect(200);
@@ -549,23 +538,21 @@ test('pastor bootstrap preserves an existing password and TOTP state while new p
 test('status changes are audited transactionally and audit failures roll back session revocation', async (t) => {
   const app = await createTestApp(t);
   const leader = await createUser();
-  const secret = authenticator.generateSecret();
-  const pastor = await User.create({
-    firstName: 'Lead', lastName: 'Pastor', email: 'pastor@example.test', role: 'admin', password: 'correct horse battery staple',
-    totp: { enabled: true, encryptedSecret: encryptSecret(secret) },
+  const support = await User.create({
+    firstName: 'Tech', lastName: 'Support', email: 'support@example.test', role: 'tech_support', password: 'correct horse battery staple',
   });
-  const pastorCookie = `cmr_token=${signToken(pastor)}`;
+  const supportCookie = await signIn(app, support.email);
   const csrf = await request(app).get('/api/auth/csrf').expect(200);
   const csrfCookie = csrf.headers['set-cookie'].find((cookie) => cookie.startsWith('cmr_csrf='));
   await request(app)
     .patch(`/api/users/${leader.id}/status`)
-    .set('Cookie', [pastorCookie, csrfCookie])
+    .set('Cookie', [supportCookie, csrfCookie])
     .set('X-CSRF-Token', csrf.body.csrfToken)
     .send({ isActive: false })
     .expect(200);
   const success = await AuditEvent.findOne({ action: 'account.status_changed', targetId: leader.id }).lean();
-  assert.equal(String(success.actor), String(pastor.id));
-  assert.equal(success.actorRole, 'admin');
+  assert.equal(String(success.actor), String(support.id));
+  assert.equal(success.actorRole, 'tech_support');
   assert.deepEqual(success.metadata.changedFields, ['isActive']);
 
   const before = await User.findById(leader.id);
@@ -577,7 +564,7 @@ test('status changes are audited transactionally and audit failures roll back se
   try {
     await request(app)
       .patch(`/api/users/${leader.id}/status`)
-      .set('Cookie', [pastorCookie, csrfCookie])
+      .set('Cookie', [supportCookie, csrfCookie])
       .set('X-CSRF-Token', csrf.body.csrfToken)
       .send({ isActive: true })
       .expect(500);

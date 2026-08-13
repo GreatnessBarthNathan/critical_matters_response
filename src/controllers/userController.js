@@ -1,9 +1,18 @@
 const User = require('../models/User');
-const Report = require('../models/Report');
 const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
 const authService = require('../services/authService');
 const auditService = require('../services/auditService');
+
+function supportAccountView(user) {
+  return {
+    id: user.id,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    isActive: user.isActive,
+  };
+}
 
 exports.updateProfile = asyncHandler(async (req, res) => {
   const allowed = ['firstName', 'lastName', 'phone', 'ministry', 'bio', 'avatarColor'];
@@ -15,17 +24,11 @@ exports.updateProfile = asyncHandler(async (req, res) => {
 });
 
 exports.listUsers = asyncHandler(async (_req, res) => {
-  const users = await User.find({ role: 'user' }).sort({ createdAt: -1 });
-  const counts = await Report.aggregate([
-    { $group: { _id: '$owner', reportCount: { $sum: 1 }, openCount: { $sum: { $cond: [{ $ne: ['$status', 'archived'] }, 1, 0] } } } },
-  ]);
-  const countMap = new Map(counts.map((item) => [String(item._id), item]));
+  const users = await User.find({ role: 'user' })
+    .select('firstName lastName email isActive')
+    .sort({ createdAt: -1 });
   res.json({
-    users: users.map((user) => ({
-      ...user.toSafeObject(),
-      reportCount: countMap.get(String(user.id))?.reportCount || 0,
-      openCount: countMap.get(String(user.id))?.openCount || 0,
-    })),
+    users: users.map(supportAccountView),
   });
 });
 
@@ -53,14 +56,14 @@ exports.setUserStatus = asyncHandler(async (req, res) => {
         return;
       }
       await auditService.record({
-        actor: req.user.id, actorRole: 'admin', action: 'account.status_changed', targetType: 'user', targetId: user.id,
+        actor: req.user.id, actorRole: req.user.role, action: 'account.status_changed', targetType: 'user', targetId: user.id,
         result: 'success', metadata: { ip: req.ip, userAgent: req.get('user-agent'), changedFields: ['isActive'] }, session,
       });
     });
   } finally {
     await session.endSession();
   }
-  res.json({ user: user.toSafeObject(), message: `Account ${user.isActive ? 'activated' : 'deactivated'}.` });
+  res.json({ user: supportAccountView(user), message: `Account ${user.isActive ? 'activated' : 'deactivated'}.` });
 });
 
 exports.issueResetCode = asyncHandler(async (req, res) => {
