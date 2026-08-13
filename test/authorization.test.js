@@ -1,8 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const express = require('express');
+const cookieParser = require('cookie-parser');
 const request = require('supertest');
 const { createTestApp } = require('./helpers/testApp');
 const User = require('../src/models/User');
+const AuditEvent = require('../src/models/AuditEvent');
+const { protect, techSupportOnly, reportParticipantOnly } = require('../src/middleware/authMiddleware');
 const { authenticator } = require('otplib');
 const { encryptSecret } = require('../src/utils/crypto');
 
@@ -70,6 +74,42 @@ async function buildMatrixFixture(t) {
   const report = await createReport(app, owner);
   return { app, pastor, owner, other, report };
 }
+
+test('tech support role persists and middleware keeps support and report access separate', async (t) => {
+  const app = await createTestApp(t);
+  const gatedApp = express();
+  gatedApp.use(cookieParser());
+  const supportUser = await createUser({ email: 'support@example.test', role: 'tech_support' });
+  await createUser({ email: 'pastor@example.test', role: 'admin' });
+  await createUser({ email: 'leader@example.test', role: 'user' });
+
+  const auditEvent = await AuditEvent.create({
+    actor: supportUser.id,
+    actorRole: 'tech_support',
+    action: 'support.test',
+    targetType: 'user',
+    targetId: supportUser.id,
+    result: 'success',
+  });
+  assert.equal((await User.findById(supportUser.id)).role, 'tech_support');
+  assert.equal(auditEvent.actorRole, 'tech_support');
+
+  gatedApp.get('/tech-support-only', protect, techSupportOnly, (_req, res) => res.sendStatus(204));
+  gatedApp.get('/report-participant-only', protect, reportParticipantOnly, (_req, res) => res.sendStatus(204));
+  gatedApp.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.code }));
+
+  const support = await signedInCookies(app, 'support@example.test');
+  const pastor = await signedInCookies(app, 'pastor@example.test');
+  const leader = await signedInCookies(app, 'leader@example.test');
+
+  await authed(request(gatedApp).get('/tech-support-only'), support).expect(204);
+  await authed(request(gatedApp).get('/tech-support-only'), pastor).expect(403);
+  await authed(request(gatedApp).get('/tech-support-only'), leader).expect(403);
+
+  await authed(request(gatedApp).get('/report-participant-only'), support).expect(403);
+  await authed(request(gatedApp).get('/report-participant-only'), pastor).expect(204);
+  await authed(request(gatedApp).get('/report-participant-only'), leader).expect(204);
+});
 
 test('privacy matrix rejects every anonymous report operation with 401', async (t) => {
   const { app, report } = await buildMatrixFixture(t);

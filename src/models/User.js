@@ -24,7 +24,8 @@ const userSchema = new mongoose.Schema({
     tokenHash: { type: String, default: '', select: false },
     expiresAt: Date,
   },
-  role: { type: String, enum: ['user', 'admin'], default: 'user', index: true },
+  // Tech support is deliberately excluded from confidential reports.
+  role: { type: String, enum: ['user', 'admin', 'tech_support'], default: 'user', index: true },
   phone: { type: String, trim: true, maxlength: 30, default: '' },
   ministry: { type: String, trim: true, maxlength: 100, default: '' },
   bio: { type: String, trim: true, maxlength: 500, default: '' },
