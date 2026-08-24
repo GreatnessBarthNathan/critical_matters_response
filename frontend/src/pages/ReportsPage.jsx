@@ -62,7 +62,7 @@ export default function ReportsPage({ archivedOnly = false }) {
           <input
             type="search"
             aria-label="Search matters"
-            placeholder="Search subject or reference"
+            placeholder="Search reference"
             value={filters.search}
             onChange={(event) => setFilters({ ...filters, search: event.target.value })}
           />

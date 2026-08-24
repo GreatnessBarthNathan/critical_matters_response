@@ -35,7 +35,7 @@ export default function LoginPage() {
     <AuthLayout
       title="Sign in"
       subtitle="Enter your details to continue."
-      footer={<p className="security-note"><ShieldCheck size={14} aria-hidden="true" /> This session is private and encrypted.</p>}
+      footer={<p className="security-note"><ShieldCheck size={14} aria-hidden="true" /> Encrypted in transit and at rest.</p>}
     >
       <div aria-live="polite" role="status">
         {error && <div className="form-error">{error}</div>}
