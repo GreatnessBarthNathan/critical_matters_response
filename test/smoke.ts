@@ -73,6 +73,7 @@ async function run() {
   process.env.JWT_SECRET = 'smoke-jwt-secret-that-is-long-enough-to-be-safe';
   process.env.CSRF_SECRET = 'smoke-csrf-secret-that-is-long-enough-to-be-safe';
   process.env.TOTP_ENCRYPTION_KEY = require('crypto').randomBytes(32).toString('base64');
+  process.env.REPORT_ENCRYPTION_KEY = require('crypto').randomBytes(32).toString('base64');
   process.env.RECOVERY_CODE_PEPPER = 'smoke-recovery-pepper-that-is-long-enough';
   process.env.ADMIN_EMAIL = PASTOR_EMAIL;
   process.env.ADMIN_PASSWORD = PASTOR_PASSWORD;

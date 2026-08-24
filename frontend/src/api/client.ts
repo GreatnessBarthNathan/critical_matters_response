@@ -1,10 +1,27 @@
-let csrfToken;
-let csrfRequest;
+export interface ApiErrorDetails {
+  status?: number;
+  code?: string;
+  message?: string;
+  fields?: Record<string, unknown>;
+  requestId?: string;
+}
+
+export type ApiRequestOptions = Omit<RequestInit, 'body'> & {
+  body?: BodyInit | Record<string, unknown>;
+};
+
+let csrfToken: string | undefined;
+let csrfRequest: Promise<string> | undefined;
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export class ApiError extends Error {
-  constructor({ status, code, message, fields, requestId }) {
+  status: number;
+  code: string;
+  fields: Record<string, unknown>;
+  requestId?: string;
+
+  constructor({ status = 0, code, message, fields, requestId }: ApiErrorDetails) {
     super(message || 'Something went wrong. Please try again.');
     this.name = 'ApiError';
     this.status = status;
@@ -24,7 +41,7 @@ export class ApiError extends Error {
 }
 
 // The API answers with { error: { code, message, fields, requestId } }.
-function errorDetails(data) {
+function errorDetails(data: unknown): ApiErrorDetails {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
   const envelope = data.error && typeof data.error === 'object' && !Array.isArray(data.error) ? data.error : data;
   return {
@@ -35,11 +52,11 @@ function errorDetails(data) {
   };
 }
 
-export function isCsrfInvalidError(data) {
+export function isCsrfInvalidError(data: unknown): boolean {
   return errorDetails(data).code === 'CSRF_INVALID';
 }
 
-function toError(response, data) {
+function toError(response: Response, data: unknown): ApiError {
   return new ApiError({ status: response.status, ...errorDetails(data) });
 }
 
@@ -77,7 +94,7 @@ export function clearCsrfToken() {
   csrfToken = undefined;
 }
 
-async function send(path, options, token) {
+async function send(path: string, options: ApiRequestOptions, token?: string) {
   const { headers: optionHeaders, body, ...requestOptions } = options;
   const response = await fetch(`/api${path}`, {
     credentials: 'include',
@@ -93,7 +110,7 @@ async function send(path, options, token) {
   return { response, data };
 }
 
-export async function api(path, options = {}) {
+export async function api<T = unknown>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const method = (options.method || 'GET').toUpperCase();
   const requiresCsrf = !SAFE_METHODS.has(method) && path !== '/auth/csrf';
   let token = requiresCsrf ? await getCsrfToken() : undefined;
@@ -109,7 +126,7 @@ export async function api(path, options = {}) {
   return data;
 }
 
-export function queryString(params = {}) {
+export function queryString(params: Record<string, unknown> = {}): string {
   const values = Object.entries(params).filter(([, value]) => value !== '' && value != null);
   return values.length ? `?${new URLSearchParams(values)}` : '';
 }
