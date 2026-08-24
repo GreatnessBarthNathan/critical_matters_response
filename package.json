@@ -7,19 +7,18 @@
   "scripts": {
     "postinstall": "npm --prefix frontend install",
     "dev": "concurrently -n API,WEB -c green,cyan \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:server": "nodemon --exec tsx server.ts",
+    "dev:server": "nodemon server.js",
     "dev:client": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
-    "start": "tsx server.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && npm --prefix frontend run typecheck",
-    "check": "npm run typecheck && npm --prefix frontend run lint && npm --prefix frontend run build",
-    "migrate:roles-and-categories": "tsx scripts/migrate-roles-and-categories.ts",
-    "migrate:report-encryption": "tsx scripts/migrate-report-encryption.ts",
-    "verify:report-encryption": "tsx scripts/verify-report-encryption.ts",
-    "rotate:report-encryption": "tsx scripts/rotate-report-encryption.ts",
-    "generate:vapid-keys": "tsx scripts/generate-vapid-keys.ts",
-    "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts",
-    "smoke": "tsx test/smoke.ts"
+    "start": "node server.js",
+    "check": "npm --prefix frontend run lint && npm --prefix frontend run build",
+    "migrate:roles-and-categories": "node scripts/migrate-roles-and-categories.js",
+    "migrate:report-encryption": "node scripts/migrate-report-encryption.js",
+    "verify:report-encryption": "node scripts/verify-report-encryption.js",
+    "rotate:report-encryption": "node scripts/rotate-report-encryption.js",
+    "generate:vapid-keys": "node scripts/generate-vapid-keys.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "smoke": "node test/smoke.js"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -40,19 +39,9 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
-    "@types/cookie-parser": "^1.4.10",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/morgan": "^1.9.10",
-    "@types/node": "^26.2.0",
-    "@types/supertest": "^7.2.1",
     "concurrently": "^9.2.0",
     "mongodb-memory-server": "10.2.0",
     "nodemon": "^3.1.10",
-    "supertest": "7.1.4",
-    "tsx": "^4.23.12",
-    "typescript": "^5.9.3"
+    "supertest": "7.1.4"
   }
 }

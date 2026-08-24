@@ -1,9 +1,9 @@
 /**
  * End-to-end smoke flow against a temporary MongoDB replica set.
  *
- * Exercises the whole approved release in order: admin bootstrap, admin TOTP, invitation,
+ * Exercises the whole approved release in order: pastor bootstrap, pastor TOTP, invitation,
  * redemption, report create/edit/revision, cross-leader privacy, both sides of the conversation,
- * archive read-only behaviour, Tech Support-assisted reset, session revocation, and production serving.
+ * archive read-only behaviour, pastor-assisted reset, session revocation, and production serving.
  *
  * Run with: npm run smoke
  */
@@ -17,8 +17,6 @@ const { authenticator } = require('otplib');
 
 const PASTOR_EMAIL = 'pastor@smoke.test';
 const PASTOR_PASSWORD = 'a strong initial pastor password';
-const SUPPORT_EMAIL = 'support@smoke.test';
-const SUPPORT_PASSWORD = 'a strong support password';
 const LEADER_EMAIL = 'leader@smoke.test';
 const LEADER_PASSWORD = 'a strong leader password';
 const OTHER_EMAIL = 'other@smoke.test';
@@ -75,26 +73,21 @@ async function run() {
   process.env.JWT_SECRET = 'smoke-jwt-secret-that-is-long-enough-to-be-safe';
   process.env.CSRF_SECRET = 'smoke-csrf-secret-that-is-long-enough-to-be-safe';
   process.env.TOTP_ENCRYPTION_KEY = require('crypto').randomBytes(32).toString('base64');
-  process.env.REPORT_ENCRYPTION_KEY = require('crypto').randomBytes(32).toString('base64');
   process.env.RECOVERY_CODE_PEPPER = 'smoke-recovery-pepper-that-is-long-enough';
   process.env.ADMIN_EMAIL = PASTOR_EMAIL;
   process.env.ADMIN_PASSWORD = PASTOR_PASSWORD;
-  process.env.TECH_SUPPORT_EMAIL = SUPPORT_EMAIL;
-  process.env.TECH_SUPPORT_PASSWORD = SUPPORT_PASSWORD;
 
   const createApp = require('../app');
   const connectDatabase = require('../src/config/database');
   const seedAdmin = require('../src/utils/seedAdmin');
-  const seedTechSupport = require('../src/utils/seedTechSupport');
 
   await connectDatabase();
 
   try {
-    // 1. Admin and Tech Support bootstrap
+    // 1. Pastor bootstrap
     await seedAdmin();
-    await seedTechSupport();
     const app = createApp();
-    step('admin and Tech Support accounts bootstrapped from the environment');
+    step('pastor account bootstrapped from the environment');
 
     // 2. Pastor TOTP is optional before the workspace opens
     let pastor = await signIn(app, PASTOR_EMAIL, PASTOR_PASSWORD);
@@ -119,10 +112,8 @@ async function run() {
     await asUser(request(app).get('/api/reports'), pastor).expect(200);
     step('pastor workspace remains available after optional two-factor verification');
 
-    const techSupport = await signIn(app, SUPPORT_EMAIL, SUPPORT_PASSWORD);
-
     // 3. Invitation
-    const invitation = await withCsrf(request(app).post('/api/invitations'), techSupport)
+    const invitation = await withCsrf(request(app).post('/api/invitations'), pastor)
       .send({ email: LEADER_EMAIL })
       .expect(201);
     const inspected = await request(app).get(`/api/invitations/${invitation.body.token}`).expect(200);
@@ -167,7 +158,7 @@ async function run() {
     step('matter created, edited, and the revision records only what changed');
 
     // 6. A second leader must not be able to reach it
-    const otherInvitation = await withCsrf(request(app).post('/api/invitations'), techSupport)
+    const otherInvitation = await withCsrf(request(app).post('/api/invitations'), pastor)
       .send({ email: OTHER_EMAIL })
       .expect(201);
     await request(app)
@@ -219,9 +210,9 @@ async function run() {
     assert.equal(reopened.body.report.status, 'in_review');
     step('pastor reopened the matter');
 
-    // 9. Tech Support-assisted reset revokes the leader's existing session
+    // 9. Pastor-assisted reset revokes the leader's existing session
     const leaderId = created.body.report.owner._id || created.body.report.owner;
-    const issued = await withCsrf(request(app).post(`/api/users/${leaderId}/reset-code`), techSupport).expect(201);
+    const issued = await withCsrf(request(app).post(`/api/users/${leaderId}/reset-code`), pastor).expect(201);
     assert.ok(issued.body.resetCode);
 
     const preResetCookie = leader.authCookie;
@@ -244,11 +235,20 @@ async function run() {
       .expect(400);
     step('a recovery code belonging to another account is refused');
 
-    // 11. The internal audit trail is not exposed as a public API.
-    await asUser(request(app).get('/api/audit'), leader).expect(404);
-    await asUser(request(app).get('/api/audit'), pastor).expect(404);
-    await asUser(request(app).get('/api/audit'), techSupport).expect(404);
-    step('audit records remain internal and the audit API is absent for every role');
+    // 11. The audit trail is pastor-only and carries no matter content
+    const auditLeader = await asUser(request(app).get('/api/audit'), leader).expect(403);
+    assert.equal(auditLeader.body.error.code, 'FORBIDDEN');
+    const audit = await asUser(request(app).get('/api/audit?limit=100'), pastor).expect(200);
+    const actions = new Set(audit.body.events.map((event) => event.action));
+    for (const required of ['invitation.create', 'invitation.redeem', 'report.create', 'report.edit', 'report.transition']) {
+      assert.ok(actions.has(required), `${required} must be audited`);
+    }
+    assert.doesNotMatch(
+      JSON.stringify(audit.body),
+      /original wording|corrected subject|praying with you|further update/i,
+      'the audit trail must never contain the content of a matter',
+    );
+    step('audit trail is pastor-only, complete, and free of matter content');
 
     // 12. Production serving
     const distIndex = path.join(__dirname, '..', 'frontend', 'dist', 'index.html');

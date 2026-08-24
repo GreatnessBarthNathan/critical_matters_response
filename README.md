@@ -269,9 +269,8 @@ Closing the pilot:
 ## Project structure
 
 ```text
-app.ts                 Express application factory (no connect, no listen)
-server.ts              Validates the environment, connects, seeds bootstrap accounts, listens
-app.js/server.js        Small CommonJS compatibility entrypoints for existing process managers
+app.js                 Express application factory (no connect, no listen)
+server.js              Validates the environment, connects, seeds bootstrap accounts, listens
 src/config/            Environment validation and database connection
 src/models/            User, Report, Invitation, AuditEvent
 src/services/          auth, invitation and report business rules
@@ -279,16 +278,7 @@ src/controllers/       Thin HTTP handlers that delegate to services
 src/routes/            Route definitions and rate limits
 src/middleware/        Authentication, CSRF, request IDs and error envelope
 src/utils/             Crypto, TOTP, tokens and account seeding
-test/                  Integration tests over the real HTTP surface (executed through tsx)
+test/                  Integration tests over the real HTTP surface
 frontend/src/design/   TGN design tokens
-frontend/src/          React TypeScript application (`.tsx` components, `.ts` utilities)
-tsconfig.json          Backend TypeScript configuration
-frontend/tsconfig.json Frontend TypeScript configuration
+frontend/src/          React application
 ```
-
-The project is authored in TypeScript while retaining the two small CommonJS entrypoint
-wrappers for backwards-compatible process-manager and test imports. `npm run typecheck` validates
-both projects; `npm run check` runs typechecking, linting, and the production frontend build.
-The initial migration keeps TypeScript's `noCheck` compatibility mode for the existing dynamic
-Mongoose/Express boundaries; typed API/auth contracts are in place, and stricter checking can be
-enabled incrementally without changing runtime behaviour.

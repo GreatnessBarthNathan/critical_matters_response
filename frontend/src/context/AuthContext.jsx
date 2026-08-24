@@ -1,32 +1,17 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
 import { api, bootstrapCsrf, clearCsrfToken } from '../api/client';
-import type { AuthResponse, LoginCredentials, User } from '../types';
 
-interface AuthContextValue {
-  user: User | null;
-  loading: boolean;
-  pendingTotp: boolean;
-  login: (credentials: LoginCredentials) => Promise<AuthResponse>;
-  verifyLoginTotp: (token: string) => Promise<AuthResponse>;
-  cancelTotp: () => void;
-  redeemInvitation: (token: string, details: Record<string, unknown>) => Promise<AuthResponse>;
-  logout: () => Promise<void>;
-  refreshUser: () => Promise<User | null>;
-  setUser: (user: User | null) => void;
-}
+const AuthContext = createContext(null);
 
-const AuthContext = createContext<AuthContextValue | null>(null);
-
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   // Set only between a correct password and a verified authenticator code.
   const [pendingTotp, setPendingTotp] = useState(false);
 
   const refreshUser = useCallback(async () => {
     try {
-      const data = await api<{ user: User }>('/auth/me');
+      const data = await api('/auth/me');
       setUser(data.user);
       setPendingTotp(false);
       return data.user;
@@ -43,8 +28,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     bootstrapCsrf().finally(refreshUser);
   }, [refreshUser]);
 
-  const login = useCallback(async (credentials: LoginCredentials): Promise<AuthResponse> => {
-    const data = await api<AuthResponse>('/auth/login', { method: 'POST', body: credentials });
+  const login = useCallback(async (credentials) => {
+    const data = await api('/auth/login', { method: 'POST', body: credentials });
     if (data.requiresTotp) {
       setPendingTotp(true);
       setUser(null);
@@ -56,8 +41,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return data;
   }, []);
 
-  const verifyLoginTotp = useCallback(async (token: string): Promise<AuthResponse> => {
-    const data = await api<AuthResponse>('/auth/totp/verify-login', { method: 'POST', body: { token } });
+  const verifyLoginTotp = useCallback(async (token) => {
+    const data = await api('/auth/totp/verify-login', { method: 'POST', body: { token } });
     await bootstrapCsrf();
     setPendingTotp(false);
     setUser(data.user);
@@ -69,8 +54,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  const redeemInvitation = useCallback(async (token: string, details: Record<string, unknown>): Promise<AuthResponse> => {
-    const data = await api<AuthResponse>(`/invitations/${encodeURIComponent(token)}/redeem`, { method: 'POST', body: details });
+  const redeemInvitation = useCallback(async (token, details) => {
+    const data = await api(`/invitations/${encodeURIComponent(token)}/redeem`, { method: 'POST', body: details });
     await bootstrapCsrf();
     setUser(data.user);
     return data;
@@ -87,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const value = useMemo<AuthContextValue>(() => ({
+  const value = useMemo(() => ({
     user,
     loading,
     pendingTotp,
