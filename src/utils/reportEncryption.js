@@ -15,6 +15,14 @@ function currentKey() {
   return decodeKey('REPORT_ENCRYPTION_KEY', process.env.REPORT_ENCRYPTION_KEY);
 }
 
+function currentKeyId() {
+  return process.env.REPORT_ENCRYPTION_KEY_ID || 'current';
+}
+
+function previousKeyId() {
+  return process.env.REPORT_ENCRYPTION_PREVIOUS_KEY_ID || 'previous';
+}
+
 function previousKey() {
   return process.env.REPORT_ENCRYPTION_PREVIOUS_KEY
     ? decodeKey('REPORT_ENCRYPTION_PREVIOUS_KEY', process.env.REPORT_ENCRYPTION_PREVIOUS_KEY)
@@ -27,7 +35,7 @@ function encryptReportValue(value) {
   const cipher = crypto.createCipheriv('aes-256-gcm', currentKey(), iv);
   const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return [PREFIX, 'current', iv, tag, ciphertext]
+  return [PREFIX, currentKeyId(), iv, tag, ciphertext]
     .map((part) => (Buffer.isBuffer(part) ? part.toString('base64url') : part))
     .join('.');
 }
@@ -39,7 +47,7 @@ function isEncryptedReportValue(value) {
 function parseEnvelope(value) {
   if (!isEncryptedReportValue(value)) throw new Error('Report value is not encrypted');
   const parts = value.split('.');
-  if (parts.length !== 5 || parts[0] !== PREFIX || !['current', 'previous'].includes(parts[1])) {
+  if (parts.length !== 5 || parts[0] !== PREFIX || !/^[A-Za-z0-9_-]{1,32}$/.test(parts[1])) {
     throw new Error('Report encryption envelope is invalid');
   }
   const [iv, tag, data] = parts.slice(2).map((part) => Buffer.from(part, 'base64url'));
@@ -49,15 +57,22 @@ function parseEnvelope(value) {
 
 function decryptReportValue(value) {
   const { keyId, iv, tag, data } = parseEnvelope(value);
-  const key = keyId === 'previous' ? previousKey() : currentKey();
-  if (!key) throw new Error('Report encryption key is unavailable');
-  try {
+  const keys = keyId === currentKeyId()
+    ? [currentKey()]
+    : keyId === previousKeyId()
+      ? [previousKey(), currentKey()]
+      : [currentKey(), previousKey()];
+  let lastError;
+  for (const key of keys.filter(Boolean)) {
+    try {
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
-  } catch (_error) {
-    throw new Error('Unable to decrypt report value');
+    } catch (error) {
+      lastError = error;
+    }
   }
+  throw new Error(lastError ? 'Unable to decrypt report value' : 'Report encryption key is unavailable');
 }
 
 function decryptLegacyOrEncryptedValue(value) {

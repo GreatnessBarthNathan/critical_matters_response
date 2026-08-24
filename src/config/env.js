@@ -29,6 +29,12 @@ function decodeReportEncryptionKey(name, value) {
   }
 }
 
+function validateReportEncryptionKeyId(name, value) {
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(value)) {
+    throw new Error(`${name} must contain only letters, numbers, underscores, or hyphens`);
+  }
+}
+
 function validateRecoveryPeppers(env) {
   validateSecret('RECOVERY_CODE_PEPPER', env.RECOVERY_CODE_PEPPER);
   if (!env.RECOVERY_CODE_PREVIOUS_PEPPERS) return;
@@ -56,8 +62,10 @@ function getConfig(env = process.env) {
     validateSecret('CSRF_SECRET', env.CSRF_SECRET);
     decodeTotpEncryptionKey(env.TOTP_ENCRYPTION_KEY);
     decodeReportEncryptionKey('REPORT_ENCRYPTION_KEY', env.REPORT_ENCRYPTION_KEY);
+    validateReportEncryptionKeyId('REPORT_ENCRYPTION_KEY_ID', env.REPORT_ENCRYPTION_KEY_ID || 'current');
     if (env.REPORT_ENCRYPTION_PREVIOUS_KEY) {
       decodeReportEncryptionKey('REPORT_ENCRYPTION_PREVIOUS_KEY', env.REPORT_ENCRYPTION_PREVIOUS_KEY);
+      validateReportEncryptionKeyId('REPORT_ENCRYPTION_PREVIOUS_KEY_ID', env.REPORT_ENCRYPTION_PREVIOUS_KEY_ID || 'previous');
     }
     validateRecoveryPeppers(env);
   }
@@ -70,4 +78,4 @@ function getConfig(env = process.env) {
   return { production, port, mongodbUri: env.MONGODB_URI, trustProxyHops: parseTrustProxyHops(env.TRUST_PROXY_HOPS) };
 }
 
-module.exports = { getConfig, parseTrustProxyHops, validateRecoveryPeppers, decodeReportEncryptionKey };
+module.exports = { getConfig, parseTrustProxyHops, validateRecoveryPeppers, decodeReportEncryptionKey, validateReportEncryptionKeyId };
