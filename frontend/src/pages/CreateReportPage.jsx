@@ -206,7 +206,7 @@ export default function CreateReportPage() {
           )}
         </div>
 
-        <p className="security-note"><ShieldCheck size={14} aria-hidden="true" /> Encrypted session · Private user and admin access</p>
+        <p className="security-note"><ShieldCheck size={14} aria-hidden="true" /> Encrypted in transit and at rest · Private user and admin access</p>
       </form>
     </div>
   );

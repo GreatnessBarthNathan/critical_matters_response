@@ -9,13 +9,14 @@ const validProductionEnv = {
   JWT_SECRET: 'j'.repeat(32),
   CSRF_SECRET: 'c'.repeat(32),
   TOTP_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+  REPORT_ENCRYPTION_KEY: Buffer.alloc(32, 2).toString('base64'),
   RECOVERY_CODE_PEPPER: 'r'.repeat(32),
 };
 
 test('getConfig reports all missing production values together', () => {
   assert.throws(
     () => getConfig({ NODE_ENV: 'production' }),
-    /Missing required environment values: MONGODB_URI, JWT_SECRET, CSRF_SECRET, TOTP_ENCRYPTION_KEY, RECOVERY_CODE_PEPPER/,
+    /Missing required environment values: MONGODB_URI, JWT_SECRET, CSRF_SECRET, TOTP_ENCRYPTION_KEY, RECOVERY_CODE_PEPPER, REPORT_ENCRYPTION_KEY/,
   );
 });
 
@@ -54,6 +55,21 @@ test('getConfig rejects malformed, noncanonical, and incorrectly sized TOTP keys
   assert.throws(
     () => getConfig({ ...validProductionEnv, TOTP_ENCRYPTION_KEY: Buffer.alloc(31, 1).toString('base64') }),
     /exactly 32 bytes/,
+  );
+});
+
+test('getConfig rejects malformed or incorrectly sized report encryption keys', () => {
+  assert.throws(
+    () => getConfig({ ...validProductionEnv, REPORT_ENCRYPTION_KEY: 'not valid base64!' }),
+    /REPORT_ENCRYPTION_KEY must be strict canonical Base64/,
+  );
+  assert.throws(
+    () => getConfig({ ...validProductionEnv, REPORT_ENCRYPTION_KEY: Buffer.alloc(31, 2).toString('base64') }),
+    /REPORT_ENCRYPTION_KEY must decode to exactly 32 bytes/,
+  );
+  assert.throws(
+    () => getConfig({ ...validProductionEnv, REPORT_ENCRYPTION_PREVIOUS_KEY: Buffer.alloc(31, 2).toString('base64') }),
+    /REPORT_ENCRYPTION_PREVIOUS_KEY must decode to exactly 32 bytes/,
   );
 });
 
