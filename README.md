@@ -289,3 +289,6 @@ frontend/tsconfig.json Frontend TypeScript configuration
 The project is authored in TypeScript while retaining the two small CommonJS entrypoint
 wrappers for backwards-compatible process-manager and test imports. `npm run typecheck` validates
 both projects; `npm run check` runs typechecking, linting, and the production frontend build.
+The initial migration keeps TypeScript's `noCheck` compatibility mode for the existing dynamic
+Mongoose/Express boundaries; typed API/auth contracts are in place, and stricter checking can be
+enabled incrementally without changing runtime behaviour.
