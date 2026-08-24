@@ -25,6 +25,9 @@ Access is **invitation-only**. There is no public sign-up page, and the service 
 - Node.js 20 or newer
 - A MongoDB deployment that supports **transactions** (a replica set or Atlas). Invitation
   redemption and report writes are transactional, so a standalone `mongod` is not sufficient.
+- Report titles, bodies, replies, and textual revisions are encrypted at rest before MongoDB stores
+  them. This is not end-to-end encryption: the application holds the report key so the Pastor can
+  sign in normally on any device and read authorised reports.
 
 ## Environment configuration
 
@@ -50,12 +53,21 @@ otherwise:
 node -e "console.log('TOTP_ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('base64'))"
 ```
 
+Generate the report-encryption key separately and keep it in the deployment secret store:
+
+```bash
+node -e "console.log('REPORT_ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('base64'))"
+```
+
 | Variable | Purpose |
 | --- | --- |
 | `MONGODB_URI` | Connection string. Required. |
 | `JWT_SECRET` | Signs session cookies. Required. |
 | `CSRF_SECRET` | Signs CSRF tokens. Required in production. |
 | `TOTP_ENCRYPTION_KEY` | AES-256-GCM key for authenticator secrets. Required in production, exactly 32 bytes. |
+| `REPORT_ENCRYPTION_KEY` | AES-256-GCM key for report titles, bodies, replies, and textual revisions. Required in production, exactly 32 bytes. |
+| `REPORT_ENCRYPTION_KEY_ID` | Non-secret identifier for the active report key. Defaults to `current`. |
+| `REPORT_ENCRYPTION_PREVIOUS_KEY` / `_ID` | Temporary previous report key and identifier during rotation. |
 | `RECOVERY_CODE_PEPPER` | Extra secret mixed into recovery-code hashes. |
 | `RECOVERY_CODE_PREVIOUS_PEPPERS` | Comma-separated old peppers, kept only while rotating. |
 | `INVITATION_TTL_DAYS` | Invitation lifetime. Default 7. |
@@ -67,12 +79,29 @@ node -e "console.log('TOTP_ENCRYPTION_KEY=' + require('crypto').randomBytes(32).
 
 Rotating a secret has consequences: changing `JWT_SECRET` signs everyone out, and changing
 `TOTP_ENCRYPTION_KEY` makes every stored authenticator secret unreadable — every user must re-enrol.
+For report encryption, set a new key and key ID, keep the old values as
+`REPORT_ENCRYPTION_PREVIOUS_KEY` and `REPORT_ENCRYPTION_PREVIOUS_KEY_ID`, then run
+`npm run rotate:report-encryption`. Verify with `npm run verify:report-encryption` before removing
+the previous key.
 
 ## Install, build and run
 
 ```bash
 npm install
 ```
+
+After deploying the encrypted-report release, create an encrypted MongoDB backup, check the
+migration without changing data, then convert existing reports:
+
+```bash
+npm run migrate:report-encryption -- --dry-run
+npm run migrate:report-encryption
+npm run verify:report-encryption
+```
+
+The migration is repeatable and reports counts only; it never prints report content. New and
+edited reports are encrypted automatically. During a controlled migration window, legacy plaintext
+records can still be read, but the application always writes encrypted values.
 
 ```bash
 npm run dev
@@ -158,7 +187,7 @@ through any screen; report access belongs only to the leader and the admin handl
 ## Security notes for operators
 
 - **Restrict database access.** Bind MongoDB to a private network or, on Atlas, allow only the
-  application server's IP. The database holds the confidential text of every matter.
+  application server's IP. The database holds encrypted confidential fields for every matter.
 - **Serve over HTTPS only.** Session cookies are marked `secure` when `NODE_ENV=production`, so
   plain HTTP will not keep anyone signed in.
 - **Set `TRUST_PROXY_HOPS` accurately.** Too high and clients can spoof their IP in the audit trail.
@@ -167,7 +196,7 @@ through any screen; report access belongs only to the leader and the admin handl
 
 1. Back up daily with `mongodump`, and store the archive encrypted and off the application server.
 2. Store the `.env` secrets separately from the data backup. A data backup without
-   `TOTP_ENCRYPTION_KEY` and `RECOVERY_CODE_PEPPER` is not fully recoverable.
+   `REPORT_ENCRYPTION_KEY`, `TOTP_ENCRYPTION_KEY`, and `RECOVERY_CODE_PEPPER` is not fully recoverable.
 3. Restore-test quarterly into a scratch database with `mongorestore`, then confirm the health
    endpoint and one sign-in.
 4. Verify after every restore: an admin can sign in, a leader sees only their own matters, and Tech

@@ -11,7 +11,7 @@ const APPEND_ONLY_REVISIONS = 'Report revisions are append-only and cannot be ch
 const responseSchema = new mongoose.Schema({
   author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   authorRole: { type: String, enum: ['user', 'admin'], required: true },
-  message: { type: String, required: true, trim: true, maxlength: 5000 },
+  message: { type: String, required: true, trim: true },
   readByUser: { type: Boolean, default: false },
   readByPastor: { type: Boolean, default: false },
 }, { timestamps: true });
@@ -32,7 +32,7 @@ const revisionSchema = new mongoose.Schema({
 const reportSchema = new mongoose.Schema({
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   reference: { type: String, required: true, unique: true, index: true },
-  title: { type: String, required: true, trim: true, maxlength: 160 },
+  title: { type: String, required: true, trim: true },
   category: {
     type: String,
     enum: CATEGORIES,
@@ -42,7 +42,7 @@ const reportSchema = new mongoose.Schema({
   urgency: { type: String, enum: URGENCIES, default: 'normal' },
   // Denormalized so pastor triage queues can sort by priority and still paginate in the database.
   priorityWeight: { type: Number, default: 0, index: true },
-  content: { type: String, required: true, trim: true, maxlength: 10000 },
+  content: { type: String, required: true, trim: true },
   status: { type: String, enum: STATUSES, default: 'new', index: true },
   responses: [responseSchema],
   revisions: { type: [revisionSchema], default: [] },
@@ -85,6 +85,14 @@ reportSchema.post('init', function recordLoadedRevisionCount() {
 
 reportSchema.pre('save', function rejectRevisionMutation(next) {
   if (this.isNew) return next();
+
+  // Report encryption legitimately rewrites the serialized values inside an existing
+  // revision while preserving its append-only meaning. Only the report service sets
+  // this private, non-persisted marker after re-encrypting the complete document.
+  if (this.$locals.allowEncryptedRevisionRewrite) {
+    this.$locals.allowEncryptedRevisionRewrite = false;
+    return next();
+  }
 
   const loadedCount = this.$locals.loadedRevisionCount ?? this.revisions.length;
   if (this.revisions.length < loadedCount) return next(new Error(APPEND_ONLY_REVISIONS));

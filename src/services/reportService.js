@@ -3,6 +3,11 @@ const mongoose = require('mongoose');
 const Report = require('../models/Report');
 const auditService = require('./auditService');
 const pushNotificationService = require('./pushNotificationService');
+const {
+  encryptReportValue,
+  decryptLegacyOrEncryptedValue,
+  isEncryptedReportValue,
+} = require('../utils/reportEncryption');
 
 const OWNER_FIELDS = 'firstName lastName email ministry avatarColor';
 const OWNER_DETAIL_FIELDS = 'firstName lastName email phone ministry avatarColor';
@@ -44,6 +49,43 @@ function editForbidden() {
 
 function validationError(message) {
   return serviceError('VALIDATION_FAILED', 400, message);
+}
+
+function reportUnavailable() {
+  return serviceError('REPORT_UNAVAILABLE', 503, 'This matter is temporarily unavailable. Please try again later.');
+}
+
+function transformReportText(report, transform) {
+  if (!report) return report;
+  for (const field of ['title', 'content']) {
+    if (typeof report[field] === 'string') report[field] = transform(report[field]);
+  }
+  for (const response of report.responses || []) {
+    if (typeof response.message === 'string') response.message = transform(response.message);
+  }
+  for (const revision of report.revisions || []) {
+    for (const change of revision.changedFields || []) {
+      if (!['title', 'content'].includes(change.field)) continue;
+      if (typeof change.previousValue === 'string') change.previousValue = transform(change.previousValue);
+      if (typeof change.nextValue === 'string') change.nextValue = transform(change.nextValue);
+    }
+  }
+  return report;
+}
+
+function encryptReportText(report) {
+  const hadLoadedRevisions = Number.isInteger(report?.$locals?.loadedRevisionCount);
+  const encrypted = transformReportText(report, (value) => (isEncryptedReportValue(value) ? value : encryptReportValue(value)));
+  if (hadLoadedRevisions) report.$locals.allowEncryptedRevisionRewrite = true;
+  return encrypted;
+}
+
+function decryptReportText(report) {
+  try {
+    return transformReportText(report, decryptLegacyOrEncryptedValue);
+  } catch (_error) {
+    throw reportUnavailable();
+  }
 }
 
 function createReference() {
@@ -162,6 +204,8 @@ async function createReport({ user, input = {}, ip, userAgent }) {
       owner: actorId(user),
       reference: createReference(),
       ...safeInput,
+      title: encryptReportValue(safeInput.title),
+      content: encryptReportValue(safeInput.content),
       status: 'new',
       readState: { ownerReadAt: new Date(), pastorReadAt: null },
     }], { session });
@@ -169,6 +213,7 @@ async function createReport({ user, input = {}, ip, userAgent }) {
     return created;
   });
 
+  decryptReportText(report);
   await report.populate('owner', OWNER_FIELDS);
   sendPushBestEffort(() => pushNotificationService.notifyAdmins({
     title: 'New private matter',
@@ -216,9 +261,7 @@ function buildListQuery({ user, filters = {} }) {
     }
     const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     query.$or = [
-      { title: { $regex: escaped, $options: 'i' } },
       { reference: { $regex: escaped, $options: 'i' } },
-      { content: { $regex: escaped, $options: 'i' } },
     ];
   }
   return query;
@@ -241,6 +284,8 @@ async function listReports({ user, filters = {}, pagination = {} }) {
     Report.countDocuments(query),
   ]);
 
+  await Promise.all(reports.map((report) => decryptReportText(report)));
+
   return {
     reports,
     pagination: {
@@ -256,6 +301,7 @@ async function listReports({ user, filters = {}, pagination = {} }) {
 async function getReport({ user, reportId, markRead = true, ip, userAgent }) {
   const report = await inTransaction(async (session) => {
     const found = await findAccessibleReport(user, reportId, session);
+    decryptReportText(found);
     const openedByPastor = isPastor(user) && found.status === 'new';
     let changed = false;
 
@@ -276,7 +322,10 @@ async function getReport({ user, reportId, markRead = true, ip, userAgent }) {
       changed = true;
     }
 
-    if (changed) await found.save({ session });
+    if (changed) {
+      encryptReportText(found);
+      await found.save({ session });
+    }
     await record({
       user,
       action: openedByPastor ? 'report.open' : 'report.view',
@@ -291,6 +340,7 @@ async function getReport({ user, reportId, markRead = true, ip, userAgent }) {
   await report.populate('owner', OWNER_DETAIL_FIELDS);
   await report.populate('responses.author', AUTHOR_FIELDS);
   await report.populate('revisions.editor', AUTHOR_FIELDS);
+  decryptReportText(report);
   return report;
 }
 
@@ -314,6 +364,7 @@ async function editReport({ user, reportId, changes = {}, ip, userAgent }) {
   const report = await inTransaction(async (session) => {
     const found = await Report.findOne({ _id: reportId, owner: actorId(user) }).session(session);
     if (!found) throw reportNotFound();
+    decryptReportText(found);
     if (found.status === 'archived') throw reportArchived();
 
     const changedFields = [];
@@ -337,6 +388,7 @@ async function editReport({ user, reportId, changes = {}, ip, userAgent }) {
     found.lastActivityAt = new Date();
     found.readState.ownerReadAt = new Date();
     found.readState.pastorReadAt = null;
+    encryptReportText(found);
     await found.save({ session });
     await record({
       user,
@@ -352,6 +404,7 @@ async function editReport({ user, reportId, changes = {}, ip, userAgent }) {
 
   await report.populate('owner', OWNER_FIELDS);
   await report.populate('revisions.editor', AUTHOR_FIELDS);
+  decryptReportText(report);
   return report;
 }
 
@@ -362,6 +415,7 @@ async function respond({ user, reportId, message, ip, userAgent }) {
 
   const report = await inTransaction(async (session) => {
     const found = await findAccessibleReport(user, reportId, session);
+    decryptReportText(found);
     if (found.status === 'archived') throw reportArchived();
 
     const pastorAuthored = isPastor(user);
@@ -381,6 +435,7 @@ async function respond({ user, reportId, message, ip, userAgent }) {
       found.readState.ownerReadAt = new Date();
       found.readState.pastorReadAt = null;
     }
+    encryptReportText(found);
     await found.save({ session });
     await record({ user, action: 'report.respond', report: found, ip, userAgent, session });
     return found;
@@ -403,6 +458,7 @@ async function respond({ user, reportId, message, ip, userAgent }) {
       url: `/app/reports/${report.id}`,
     }));
   }
+  decryptReportText(report);
   return report;
 }
 
@@ -425,6 +481,7 @@ async function transition({ pastor, reportId, status, ip, userAgent }) {
     found.lastActivityAt = new Date();
     found.readState.pastorReadAt = new Date();
     found.readState.ownerReadAt = null;
+    encryptReportText(found);
     await found.save({ session });
     await record({
       user: pastor,
@@ -439,6 +496,7 @@ async function transition({ pastor, reportId, status, ip, userAgent }) {
   });
 
   await report.populate('owner', OWNER_FIELDS);
+  decryptReportText(report);
   return report;
 }
 
@@ -469,7 +527,7 @@ async function getStats(user) {
       open: total - archived,
       private: privateCount,
     },
-    recent,
+    recent: recent.map((report) => decryptReportText(report)),
   };
 }
 

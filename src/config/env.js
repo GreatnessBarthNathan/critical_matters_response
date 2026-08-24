@@ -19,6 +19,22 @@ function decodeTotpEncryptionKey(value) {
   }
 }
 
+function decodeReportEncryptionKey(name, value) {
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.toString('base64') !== value) {
+    throw new Error(`${name} must be strict canonical Base64`);
+  }
+  if (decoded.length !== 32) {
+    throw new Error(`${name} must decode to exactly 32 bytes`);
+  }
+}
+
+function validateReportEncryptionKeyId(name, value) {
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(value)) {
+    throw new Error(`${name} must contain only letters, numbers, underscores, or hyphens`);
+  }
+}
+
 function validateRecoveryPeppers(env) {
   validateSecret('RECOVERY_CODE_PEPPER', env.RECOVERY_CODE_PEPPER);
   if (!env.RECOVERY_CODE_PREVIOUS_PEPPERS) return;
@@ -38,13 +54,19 @@ function parseTrustProxyHops(value) {
 function getConfig(env = process.env) {
   const production = env.NODE_ENV === 'production';
   const required = ['MONGODB_URI', 'JWT_SECRET'];
-  if (production) required.push('CSRF_SECRET', 'TOTP_ENCRYPTION_KEY', 'RECOVERY_CODE_PEPPER');
+  if (production) required.push('CSRF_SECRET', 'TOTP_ENCRYPTION_KEY', 'RECOVERY_CODE_PEPPER', 'REPORT_ENCRYPTION_KEY');
   const missing = required.filter((key) => !env[key]);
   if (missing.length) throw new Error(`Missing required environment values: ${missing.join(', ')}`);
   if (production) {
     validateSecret('JWT_SECRET', env.JWT_SECRET);
     validateSecret('CSRF_SECRET', env.CSRF_SECRET);
     decodeTotpEncryptionKey(env.TOTP_ENCRYPTION_KEY);
+    decodeReportEncryptionKey('REPORT_ENCRYPTION_KEY', env.REPORT_ENCRYPTION_KEY);
+    validateReportEncryptionKeyId('REPORT_ENCRYPTION_KEY_ID', env.REPORT_ENCRYPTION_KEY_ID || 'current');
+    if (env.REPORT_ENCRYPTION_PREVIOUS_KEY) {
+      decodeReportEncryptionKey('REPORT_ENCRYPTION_PREVIOUS_KEY', env.REPORT_ENCRYPTION_PREVIOUS_KEY);
+      validateReportEncryptionKeyId('REPORT_ENCRYPTION_PREVIOUS_KEY_ID', env.REPORT_ENCRYPTION_PREVIOUS_KEY_ID || 'previous');
+    }
     validateRecoveryPeppers(env);
   }
 
@@ -56,4 +78,4 @@ function getConfig(env = process.env) {
   return { production, port, mongodbUri: env.MONGODB_URI, trustProxyHops: parseTrustProxyHops(env.TRUST_PROXY_HOPS) };
 }
 
-module.exports = { getConfig, parseTrustProxyHops, validateRecoveryPeppers };
+module.exports = { getConfig, parseTrustProxyHops, validateRecoveryPeppers, decodeReportEncryptionKey, validateReportEncryptionKeyId };
