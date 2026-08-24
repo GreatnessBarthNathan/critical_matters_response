@@ -8,6 +8,7 @@ const AuditEvent = require('../src/models/AuditEvent');
 const auditService = require('../src/services/auditService');
 const { authenticator } = require('otplib');
 const { encryptSecret } = require('../src/utils/crypto');
+const { isEncryptedReportValue, decryptReportValue } = require('../src/utils/reportEncryption');
 
 const PASSWORD = 'correct horse battery staple';
 const PASTOR_TOTP_SECRET = authenticator.generateSecret();
@@ -73,6 +74,11 @@ test('report lifecycle follows the approved status transitions', async (t) => {
 
   const created = await createReport(app, leaderCookies);
   assert.equal(created.status, 'new');
+  const stored = await Report.findById(created._id).lean();
+  assert.equal(isEncryptedReportValue(stored.title), true);
+  assert.equal(isEncryptedReportValue(stored.content), true);
+  assert.equal(stored.title.includes('Family matter'), false);
+  assert.equal(stored.content.includes('confidential matter'), false);
 
   const pastorOpen = await authed(request(app).get(`/api/reports/${created._id}`), pastorCookies).expect(200);
   assert.equal(pastorOpen.body.report.status, 'in_review');
@@ -151,6 +157,10 @@ test('editing a report stores an immutable revision containing only changed fiel
   const edited = await csrf(request(app).patch(`/api/reports/${created._id}`), leaderCookies)
     .send({ title: 'Corrected subject line', urgency: 'important' })
     .expect(200);
+
+  const storedAfterEdit = await Report.findById(created._id).lean();
+  assert.equal(isEncryptedReportValue(storedAfterEdit.title), true);
+  assert.equal(isEncryptedReportValue(storedAfterEdit.revisions[0].changedFields[0].previousValue), true);
 
   assert.equal(edited.body.report.revisions.length, 1);
   const [revision] = edited.body.report.revisions;
@@ -350,7 +360,8 @@ test('report mutations and their audit records commit or roll back together', as
     .send({ title: 'This edit must roll back' })
     .expect(500);
   let stored = await Report.findById(created._id);
-  assert.equal(stored.title, 'Family matter needing prayer');
+  assert.equal(isEncryptedReportValue(stored.title), true);
+  assert.equal(decryptReportValue(stored.title), 'Family matter needing prayer');
   assert.equal(stored.revisions.length, 0);
 
   failedAction = 'report.open';
